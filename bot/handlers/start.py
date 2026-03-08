@@ -48,9 +48,9 @@ async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
 
     bot_username = config.bot.bot_username or "your_bot"
     welcome = (
-        "👋 Добро пожаловать!\n\n"
-        "Здесь вы можете купить Telegram Stars.\n\n"
-        "Выберите действие:"
+        "🌟 Здравствуйте!\n\n"
+        "С помощью нашего сервиса вы сможете мгновенно купить или продать Telegram Stars, "
+        "а также оформить Telegram Premium за рубли или криптовалюту."
     )
     await message.answer(welcome, reply_markup=main_menu_kb())
 
