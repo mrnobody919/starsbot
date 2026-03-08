@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User, Order
-from bot.database.repository import get_or_create_user as get_user
+from bot.database.repository import get_or_create_user as get_user, get_usd_per_star
 from bot.keyboards import back_to_menu_kb
 from bot.keyboards.buy import (
     recipient_choice_kb,
@@ -154,8 +154,9 @@ async def process_amount(
         await message.answer(f"❌ {err}\nВведите число от 50 до 50 000:")
         return
 
+    usd_per_star = await get_usd_per_star(session, config.price.usd_per_star)
     engine = _get_price_engine(config)
-    quote = await engine.quote(value)
+    quote = await engine.quote(value, usd_per_star_override=usd_per_star)
     await state.update_data(stars=value, quote_usd=quote.amount_usd, quote_ton=quote.amount_ton)
 
     # Проверка баланса пользователя

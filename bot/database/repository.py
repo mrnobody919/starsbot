@@ -1,11 +1,13 @@
 """
-Репозиторий: получение/создание пользователя, работа с заказами и рефералами.
+Репозиторий: получение/создание пользователя, настройки (курс Stars), заказы и рефералы.
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import User, Order, Referral
+from bot.database.models import User, Order, Referral, AppSettings
 from bot.utils.helpers import generate_referral_code
+
+SETTING_USD_PER_STAR = "usd_per_star"
 
 
 async def get_or_create_user(
@@ -47,3 +49,36 @@ async def get_or_create_user(
             session.add(Referral(referrer_id=referrer.id, referred_user_id=user.id))
 
     return user, True
+
+
+async def get_setting(session: AsyncSession, key: str) -> str | None:
+    """Возвращает значение настройки по ключу или None."""
+    result = await session.execute(select(AppSettings).where(AppSettings.key == key))
+    row = result.scalar_one_or_none()
+    return row.value if row else None
+
+
+async def set_setting(session: AsyncSession, key: str, value: str) -> None:
+    """Сохраняет настройку (создаёт или обновляет)."""
+    result = await session.execute(select(AppSettings).where(AppSettings.key == key))
+    row = result.scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        session.add(AppSettings(key=key, value=value))
+
+
+async def get_usd_per_star(session: AsyncSession, default: float) -> float:
+    """Возвращает курс 1 Star = X USD из БД или default из конфига."""
+    raw = await get_setting(session, SETTING_USD_PER_STAR)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return default
+
+
+async def set_usd_per_star(session: AsyncSession, value: float) -> None:
+    """Сохраняет курс 1 Star = X USD в БД (для админки)."""
+    await set_setting(session, SETTING_USD_PER_STAR, str(value))

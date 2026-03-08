@@ -53,6 +53,25 @@ async def _notify_admins_new_order(bot: Bot, admin_ids: list[int], order: Order,
             logger.warning("Notify admin %s failed: %s", aid, e)
 
 
+async def _send_order_to_channel(bot: Bot, channel_id: int, order: Order, user: User):
+    """Отправка оплаченного заказа в канал/группу (если задан ORDERS_CHANNEL_ID)."""
+    recipient = getattr(order, "recipient_username", None) or "себе"
+    if recipient and recipient != "себе" and not recipient.startswith("@"):
+        recipient = f"@{recipient}"
+    text = (
+        f"🆕 <b>Оплачен заказ #{order.id}</b>\n\n"
+        f"👤 Покупатель: <code>{user.telegram_id}</code> (@{user.username or '—'})\n"
+        f"📤 Получатель Stars: {recipient}\n"
+        f"⭐ Количество: {order.stars_amount}\n"
+        f"💵 Сумма: {order.price} $ ({order.payment_method})\n\n"
+        f"⏳ Ожидает отправки."
+    )
+    try:
+        await bot.send_message(channel_id, text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning("Send order to channel %s failed: %s", channel_id, e)
+
+
 def _build_stars_invoice_payload(order_id: int) -> str:
     """Payload для pre_checkout/successful_payment — идентификация заказа."""
     return f"order_{order_id}"
@@ -126,6 +145,8 @@ async def successful_payment(message: Message, session: AsyncSession, config: Ap
     await _notify_user_order_paid(message.bot, user.telegram_id if user else 0, order.id, order.stars_amount)
     if user and config.admin_ids:
         await _notify_admins_new_order(message.bot, config.admin_ids, order, user)
+    if config.orders_channel_id and user:
+        await _send_order_to_channel(message.bot, config.orders_channel_id, order, user)
     logger.info("Order %s paid (Telegram payment)", order_id)
 
 
@@ -165,6 +186,8 @@ async def handle_freekassa_paid(
         await _notify_user_order_paid(bot, user.telegram_id, order.id, order.stars_amount)
         if config.admin_ids:
             await _notify_admins_new_order(bot, config.admin_ids, order, user)
+        if config.orders_channel_id:
+            await _send_order_to_channel(bot, config.orders_channel_id, order, user)
     logger.info("Order %s paid (FreeKassa)", order_id)
     return True
 

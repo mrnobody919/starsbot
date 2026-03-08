@@ -108,3 +108,12 @@ class AdminLog(Base):
     admin_id: Mapped[int] = mapped_column(BigInteger, index=True)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AppSettings(Base):
+    """Настройки приложения (ключ-значение), в т.ч. курс Stars из админки."""
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)

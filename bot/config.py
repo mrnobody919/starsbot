@@ -105,7 +105,7 @@ class FreeKassaConfig:
 @dataclass
 class PriceConfig:
     """Настройки ценового движка. Курс Stars: 1 Star = usd_per_star USD. TON: сумма_ton = сумма_usd / курс_ton_usd."""
-    usd_per_star: float = 0.015  # 1 звезда = 0.015 USD (курс Telegram Stars)
+    usd_per_star: float = 0.0175  # 1 звезда = 0.0175 USD (курс Telegram Stars)
     ton_usd_rate: Optional[float] = None  # курс TON к USD: 1 TON = N USD (например 1.33). Сумма в TON = сумма_usd / ton_usd_rate
     ton_per_star: Optional[float] = None  # альтернатива: 1 звезда = N TON (если задано и нет ton_usd_rate)
     ton_usd_url: str = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
@@ -120,7 +120,7 @@ class PriceConfig:
         ton_usd_str = os.getenv("TON_USD_RATE", "").strip()
         ton_usd_rate = float(ton_usd_str) if ton_usd_str else None
         return cls(
-            usd_per_star=float(os.getenv("USD_PER_STAR", "0.015")),
+            usd_per_star=float(os.getenv("USD_PER_STAR", "0.0175")),
             ton_usd_rate=ton_usd_rate if (ton_usd_rate and ton_usd_rate > 0) else None,
             ton_per_star=ton_per_star if (ton_per_star and ton_per_star > 0) else None,
             update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
@@ -158,11 +158,14 @@ class AppConfig:
     support_link: Optional[str] = None
     webhook_base_url: Optional[str] = None  # для FreeKassa webhook на Railway
     rub_per_usd: float = 100.0  # курс ₽/USD для пополнения баланса из FreeKassa
+    orders_channel_id: Optional[int] = None  # ID канала/группы для дублирования оплаченных заказов (бот должен быть добавлен)
 
     @classmethod
     def from_env(cls) -> "AppConfig":
         admin_str = os.getenv("ADMIN_IDS", "")
         admin_ids = [int(x.strip()) for x in admin_str.split(",") if x.strip()]
+        channel_str = (os.getenv("ORDERS_CHANNEL_ID") or "").strip()
+        orders_channel_id = int(channel_str) if channel_str else None
         return cls(
             bot=BotConfig.from_env(),
             database=DatabaseConfig.from_env(),
@@ -176,6 +179,7 @@ class AppConfig:
             support_link=os.getenv("SUPPORT_LINK"),
             webhook_base_url=os.getenv("WEBHOOK_BASE_URL"),
             rub_per_usd=float(os.getenv("RUB_PER_USD", "100")),
+            orders_channel_id=orders_channel_id,
         )
 
 

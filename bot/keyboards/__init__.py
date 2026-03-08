@@ -16,6 +16,7 @@ from .admin_menu import (
     admin_order_actions_kb,
     admin_user_actions_kb,
     admin_confirm_broadcast_kb,
+    admin_price_back_kb,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "admin_order_actions_kb",
     "admin_user_actions_kb",
     "admin_confirm_broadcast_kb",
+    "admin_price_back_kb",
 ]

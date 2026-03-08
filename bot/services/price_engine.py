@@ -90,18 +90,26 @@ class PriceEngine:
     def stars_to_usd(self, stars: int) -> float:
         """
         Переводит количество Stars в USD: 1 Star = usd_per_star USD, с учётом скидок.
-        Курс задаётся в конфиге (USD_PER_STAR, по умолчанию 0.015).
+        Курс задаётся в конфиге (USD_PER_STAR, по умолчанию 0.0175).
         """
         mult = self._discount_multiplier(stars)
         base_usd = stars * self.config.usd_per_star
         return round(base_usd * mult, 2)
 
-    async def quote(self, stars: int) -> PriceQuote:
+    def stars_to_usd_with_rate(self, stars: int, usd_per_star: float) -> float:
+        """Считает USD за stars по заданному курсу (с учётом скидок)."""
+        mult = self._discount_multiplier(stars)
+        return round(stars * usd_per_star * mult, 2)
+
+    async def quote(self, stars: int, usd_per_star_override: Optional[float] = None) -> PriceQuote:
         """
         Возвращает цену за указанное количество Stars в USD и TON.
-        Курс TON берётся из get_ton_usd() (при TON_PER_STAR — из него, иначе CoinGecko).
+        usd_per_star_override: курс из админки (1 Star = X USD); если None — из конфига.
         """
-        amount_usd = self.stars_to_usd(stars)
+        if usd_per_star_override is not None and usd_per_star_override > 0:
+            amount_usd = self.stars_to_usd_with_rate(stars, usd_per_star_override)
+        else:
+            amount_usd = self.stars_to_usd(stars)
         amount_ton: Optional[float] = None
         ton_usd = await self.get_ton_usd()
         if ton_usd and ton_usd > 0:

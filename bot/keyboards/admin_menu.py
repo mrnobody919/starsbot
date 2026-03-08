@@ -10,8 +10,16 @@ def admin_main_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 Оплаченные заказы", callback_data="admin:orders")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="admin:users")],
+        [InlineKeyboardButton(text="💵 Курс Stars ($)", callback_data="admin:price")],
         [InlineKeyboardButton(text="📤 Рассылка", callback_data="admin:broadcast")],
         [InlineKeyboardButton(text="◀️ Закрыть", callback_data="admin:close")]
+    ])
+
+
+def admin_price_back_kb() -> InlineKeyboardMarkup:
+    """Назад из экрана курса Stars."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:main")]
     ])
 
 

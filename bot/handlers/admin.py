@@ -10,12 +10,14 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User, Order, Transaction, AdminLog
+from bot.database.repository import get_usd_per_star, set_usd_per_star
 from bot.keyboards import (
     admin_main_kb,
     admin_orders_filter_kb,
     admin_order_actions_kb,
     admin_user_actions_kb,
     admin_confirm_broadcast_kb,
+    admin_price_back_kb,
 )
 from bot.config import AppConfig
 from bot.utils.helpers import format_datetime, format_stars
@@ -34,17 +36,22 @@ class BroadcastStates(StatesGroup):
     waiting_text = State()
 
 
+class PriceStates(StatesGroup):
+    entering_usd_per_star = State()
+
+
 async def _log_admin(session: AsyncSession, admin_id: int, action: str, details: str | None = None):
     """Логирование действия админа."""
     session.add(AdminLog(admin_id=admin_id, action=action, details=details))
 
 
 @router.message(F.text == "/admin")
-async def admin_entry(message: Message, session: AsyncSession, config: AppConfig):
+async def admin_entry(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):
     """Вход в админ-панель по команде /admin."""
     if not _is_admin(message.from_user.id, config):
         await message.answer("Доступ запрещён. Ваш ID не в списке администраторов.")
         return
+    await state.clear()
     await message.answer("🔐 Админ-панель", reply_markup=admin_main_kb())
 
 
@@ -56,11 +63,12 @@ async def admin_close(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "admin:main")
-async def admin_main(callback: CallbackQuery, config: AppConfig):
+async def admin_main(callback: CallbackQuery, state: FSMContext, config: AppConfig):
     """Главное меню админки."""
     if not _is_admin(callback.from_user.id, config):
         await callback.answer("Доступ запрещён.", show_alert=True)
         return
+    await state.clear()
     await callback.message.edit_text("🔐 Админ-панель", reply_markup=admin_main_kb())
     await callback.answer()
 
@@ -253,6 +261,45 @@ async def admin_user_unblock(callback: CallbackQuery, session: AsyncSession, con
     await _log_admin(session, callback.from_user.id, "user_unblock", f"user_id={user_id}")
     await callback.answer("Пользователь разблокирован.")
     await callback.message.edit_reply_markup(reply_markup=admin_user_actions_kb(user_id, False))
+
+
+@router.callback_query(F.data == "admin:price")
+async def admin_price_show(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Показать текущий курс Stars и предложить ввести новый."""
+    if not _is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    current = await get_usd_per_star(session, config.price.usd_per_star)
+    await state.set_state(PriceStates.entering_usd_per_star)
+    await callback.message.edit_text(
+        f"💵 <b>Курс Stars</b>\n\n"
+        f"Сейчас: 1 ⭐ = <b>{current:.4f}$</b>\n\n"
+        "Введите новый курс (одно число), например <code>0.0175</code> или <code>0.02</code>:",
+        reply_markup=admin_price_back_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(PriceStates.entering_usd_per_star, F.text)
+async def admin_price_save(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Сохранить новый курс Stars из админки."""
+    if not _is_admin(message.from_user.id, config):
+        return
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        value = float(text)
+    except ValueError:
+        await message.answer("Введите число, например 0.0175")
+        return
+    if value < 0.001 or value > 1.0:
+        await message.answer("Курс должен быть от 0.001 до 1.0 $ за звезду.")
+        return
+    await set_usd_per_star(session, value)
+    await session.commit()
+    await _log_admin(session, message.from_user.id, "price_change", f"usd_per_star={value}")
+    await state.clear()
+    await message.answer(f"✅ Курс обновлён: 1 ⭐ = {value:.4f}$")
 
 
 @router.callback_query(F.data == "admin:broadcast")
