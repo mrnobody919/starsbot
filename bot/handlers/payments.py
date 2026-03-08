@@ -2,7 +2,7 @@
 Обработка платежей: успешная оплата (Telegram Stars / CryptoBot), webhook FreeKassa.
 Уведомления пользователю и админу.
 """
-from aiogram import Router, Bot
+from aiogram import Router, Bot, F
 from aiogram.types import Message, PreCheckoutQuery, LabeledPrice
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
