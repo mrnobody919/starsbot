@@ -104,17 +104,17 @@ class FreeKassaConfig:
 
 @dataclass
 class PriceConfig:
-    """Настройки ценового движка."""
-    stars_per_usd: float = 100.0  # сколько Stars за 1 USD
+    """Настройки ценового движка. Курс Stars: 1 Star = usd_per_star USD."""
+    usd_per_star: float = 0.015  # 1 звезда = 0.015 USD (курс Telegram Stars)
     ton_usd_url: str = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
-    update_interval_seconds: int = 600  # 10 минут (CoinGecko бесплатно лимитирует запросы)
+    update_interval_seconds: int = 600  # 10 минут — автообновление курса TON/USD
     # Скидки: (мин. сумма заказа в Stars, множитель цены 0.0-1.0)
     discount_tiers: tuple = ((1000, 0.98), (5000, 0.95), (10000, 0.92))
 
     @classmethod
     def from_env(cls) -> "PriceConfig":
         return cls(
-            stars_per_usd=float(os.getenv("STARS_PER_USD", "100")),
+            usd_per_star=float(os.getenv("USD_PER_STAR", "0.015")),
             update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
         )
 

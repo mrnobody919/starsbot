@@ -73,7 +73,7 @@ python -m bot.main
 | `ADMIN_IDS` | ID админов через запятую |
 | `FREEKASSA_MERCHANT_ID`, `FREEKASSA_SECRET_WORD_1`, `FREEKASSA_SECRET_WORD_2` | Настройки FreeKassa |
 | `WEBHOOK_BASE_URL` | Публичный URL приложения (для FreeKassa notification_url), например `https://your-app.railway.app` |
-| `STARS_PER_USD` | Сколько Stars за 1 USD (по умолчанию 100) |
+| `USD_PER_STAR` | Курс: 1 Star = 0.015 USD (автообновление TON по CoinGecko каждые 10 мин) |
 | `MIN_STARS_PER_ORDER`, `MAX_STARS_PER_ORDER` | Лимиты заказа (50 и 50000) |
 | `REFERRAL_PERCENT` | Процент реферального бонуса (10) |
 | `ANTIFRAUD_MAX_ORDERS_PER_MINUTE` | Лимит заказов в минуту (3) |

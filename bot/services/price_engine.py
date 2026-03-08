@@ -79,12 +79,11 @@ class PriceEngine:
 
     def stars_to_usd(self, stars: int) -> float:
         """
-        Переводит количество Stars в USD по базовому курсу и скидкам.
-        stars_per_usd — сколько Stars даём за 1 USD (базово).
+        Переводит количество Stars в USD: 1 Star = usd_per_star USD, с учётом скидок.
+        Курс задаётся в конфиге (USD_PER_STAR, по умолчанию 0.015).
         """
         mult = self._discount_multiplier(stars)
-        # За 1 USD даём stars_per_usd Stars => за stars Stars нужно stars / stars_per_usd USD
-        base_usd = stars / self.config.stars_per_usd
+        base_usd = stars * self.config.usd_per_star
         return round(base_usd * mult, 2)
 
     async def quote(self, stars: int) -> PriceQuote:
