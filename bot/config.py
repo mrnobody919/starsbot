@@ -64,18 +64,26 @@ class TonConfig:
         )
 
 
+def _is_false(s: str) -> bool:
+    """Проверяет, что значение считается «выключено» (0, false, no, off)."""
+    return (s or "").strip().lower() in ("0", "false", "no", "off")
+
+
 @dataclass
 class FreeKassaConfig:
-    """Настройки FreeKassa. Если переменные не заданы — оплата через FreeKassa отключена."""
+    """Настройки FreeKassa. Если переменные не заданы или FREEKASSA_ENABLED=0 — оплата отключена."""
     merchant_id: str
     secret_word_1: str
     secret_word_2: str
     secret_word_3: Optional[str] = None
     webhook_secret: Optional[str] = None
+    force_disabled: bool = False  # True, если FREEKASSA_ENABLED=0 (ещё не активирован)
 
     @property
     def enabled(self) -> bool:
-        """True, если все обязательные поля заданы и FreeKassa доступна."""
+        """True, если FreeKassa включена и все обязательные поля заданы."""
+        if self.force_disabled:
+            return False
         return bool(self.merchant_id and self.secret_word_1 and self.secret_word_2)
 
     @classmethod
@@ -83,12 +91,14 @@ class FreeKassaConfig:
         mid = os.getenv("FREEKASSA_MERCHANT_ID") or ""
         s1 = os.getenv("FREEKASSA_SECRET_WORD_1") or ""
         s2 = os.getenv("FREEKASSA_SECRET_WORD_2") or ""
+        force_off = _is_false(os.getenv("FREEKASSA_ENABLED", ""))
         return cls(
             merchant_id=mid,
             secret_word_1=s1,
             secret_word_2=s2,
             secret_word_3=os.getenv("FREEKASSA_SECRET_WORD_3"),
-            webhook_secret=os.getenv("FREEKASSA_WEBHOOK_SECRET")
+            webhook_secret=os.getenv("FREEKASSA_WEBHOOK_SECRET"),
+            force_disabled=force_off,
         )
 
 

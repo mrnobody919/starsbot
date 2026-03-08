@@ -60,9 +60,11 @@ class FreeKassaService:
         if notification_url:
             payload["notification_url"] = notification_url
 
-        for attempt in range(2):
+        # С Railway до api.freekassa.ru бывают таймауты — несколько попыток и увеличенный timeout
+        timeout_sec = 45.0
+        for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=25.0) as client:
+                async with httpx.AsyncClient(timeout=timeout_sec) as client:
                     r = await client.post(FREEKASSA_CREATE_URL, json=payload)
                     if r.status_code != 200:
                         logger.warning("FreeKassa create order: %s %s", r.status_code, r.text)
@@ -74,8 +76,10 @@ class FreeKassaService:
                     logger.warning("FreeKassa no URL in response: %s", data)
                     return None
             except (httpx.ConnectTimeout, httpx.ConnectError) as e:
-                if attempt == 0:
-                    await asyncio.sleep(2.0)
+                if attempt < 2:
+                    delay = 3.0 + attempt * 2.0  # 3s, 5s перед повтором
+                    logger.warning("FreeKassa create_order попытка %s: %s, повтор через %.0f с", attempt + 1, e, delay)
+                    await asyncio.sleep(delay)
                     continue
                 logger.exception("FreeKassa create_order: %s", e)
                 return None
