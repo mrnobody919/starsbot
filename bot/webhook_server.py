@@ -17,6 +17,8 @@ def create_webhook_app(bot, session_factory, config):
 
     async def freekassa_webhook(request: web.Request) -> web.Response:
         """Принимает GET или POST от FreeKassa, проверяет подпись, помечает заказ оплаченным."""
+        if not config.freekassa.enabled:
+            return web.Response(status=503, text="FreeKassa not configured")
         try:
             if request.method == "GET":
                 payload = dict(request.query)

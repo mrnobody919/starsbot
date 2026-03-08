@@ -89,7 +89,7 @@ async def process_amount(
 
     await message.answer(
         text,
-        reply_markup=payment_method_kb(),
+        reply_markup=payment_method_kb(freekassa_enabled=config.freekassa.enabled),
         parse_mode="HTML",
     )
 
@@ -193,6 +193,10 @@ async def confirm_and_pay(
     price_usd = order.price
 
     if method == "freekassa":
+        if not config.freekassa.enabled:
+            await callback.answer("Оплата FreeKassa временно недоступна.", show_alert=True)
+            await callback.message.edit_text("Выберите другой способ оплаты.", reply_markup=payment_method_kb(freekassa_enabled=False))
+            return
         fk = FreeKassaService(config.freekassa)
         notification_url = None
         if config.webhook_base_url:

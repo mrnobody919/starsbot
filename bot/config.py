@@ -66,21 +66,23 @@ class TonConfig:
 
 @dataclass
 class FreeKassaConfig:
-    """Настройки FreeKassa."""
+    """Настройки FreeKassa. Если переменные не заданы — оплата через FreeKassa отключена."""
     merchant_id: str
     secret_word_1: str
     secret_word_2: str
     secret_word_3: Optional[str] = None
-    # IP для whitelist webhook (опционально)
     webhook_secret: Optional[str] = None
+
+    @property
+    def enabled(self) -> bool:
+        """True, если все обязательные поля заданы и FreeKassa доступна."""
+        return bool(self.merchant_id and self.secret_word_1 and self.secret_word_2)
 
     @classmethod
     def from_env(cls) -> "FreeKassaConfig":
-        mid = os.getenv("FREEKASSA_MERCHANT_ID")
-        s1 = os.getenv("FREEKASSA_SECRET_WORD_1")
-        s2 = os.getenv("FREEKASSA_SECRET_WORD_2")
-        if not mid or not s1 or not s2:
-            raise ValueError("FREEKASSA_MERCHANT_ID, FREEKASSA_SECRET_WORD_1, FREEKASSA_SECRET_WORD_2 обязательны")
+        mid = os.getenv("FREEKASSA_MERCHANT_ID") or ""
+        s1 = os.getenv("FREEKASSA_SECRET_WORD_1") or ""
+        s2 = os.getenv("FREEKASSA_SECRET_WORD_2") or ""
         return cls(
             merchant_id=mid,
             secret_word_1=s1,

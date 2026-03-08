@@ -41,6 +41,8 @@ class FreeKassaService:
         amount — сумма, currency — например RUB, USD.
         order_id — уникальный ID заказа в нашей системе.
         """
+        if not self.config.merchant_id or not self.config.secret_word_1:
+            return None
         signature = self._sign(self.config.merchant_id, amount, self.config.secret_word_1, order_id)
 
         payload = {
