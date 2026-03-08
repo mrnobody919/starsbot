@@ -525,9 +525,10 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
 @router.callback_query(BuyStates.entering_recipient_username, F.data == "menu:main")
 @router.callback_query(BuyStates.entering_amount, F.data == "menu:main")
 @router.callback_query(BuyStates.choosing_payment, F.data == "menu:main")
-async def buy_back_to_menu(callback: CallbackQuery, state: FSMContext):
-    """Возврат в меню из сценария покупки."""
+async def buy_back_to_menu(callback: CallbackQuery, state: FSMContext, config: AppConfig):
+    """Возврат в меню из сценария покупки. Админам показывается кнопка «Админ панель»."""
     await state.clear()
     from bot.keyboards import main_menu_kb
-    await callback.message.edit_text("Выберите действие:", reply_markup=main_menu_kb())
+    is_admin = callback.from_user.id in config.admin_ids
+    await callback.message.edit_text("Выберите действие:", reply_markup=main_menu_kb(is_admin=is_admin))
     await callback.answer()

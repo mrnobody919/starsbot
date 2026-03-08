@@ -30,7 +30,7 @@ def _parse_start_ref(text: str | None) -> str | None:
 async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
     """
     Команда /start: регистрируем/обновляем пользователя, показываем меню.
-    Если ссылка вида /start ref_CODE — сохраняем реферера.
+    Если ссылка вида /start ref_CODE — сохраняем реферера. Админам показывается кнопка «Админ панель».
     """
     user = message.from_user
     if not user:
@@ -46,21 +46,22 @@ async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
     if created:
         logger.info("New user: %s (%s)", user.id, user.username)
 
-    bot_username = config.bot.bot_username or "your_bot"
+    is_admin = user.id in config.admin_ids
     welcome = (
         "🌟 Здравствуйте!\n\n"
         "С помощью нашего сервиса вы сможете мгновенно купить или продать Telegram Stars, "
         "а также оформить Telegram Premium за рубли или криптовалюту."
     )
-    await message.answer(welcome, reply_markup=main_menu_kb())
+    await message.answer(welcome, reply_markup=main_menu_kb(is_admin=is_admin))
 
 
 @router.callback_query(F.data == "menu:main")
-async def menu_main(callback: CallbackQuery, session: AsyncSession):
-    """Возврат в главное меню по кнопке «В меню»."""
+async def menu_main(callback: CallbackQuery, session: AsyncSession, config: AppConfig):
+    """Возврат в главное меню по кнопке «В меню». Админам показывается кнопка «Админ панель»."""
+    is_admin = callback.from_user.id in config.admin_ids
     await callback.message.edit_text(
         "Выберите действие:",
-        reply_markup=main_menu_kb()
+        reply_markup=main_menu_kb(is_admin=is_admin)
     )
     await callback.answer()
 
