@@ -12,6 +12,11 @@ from sqlalchemy.pool import NullPool
 
 from .models import Base
 
+# SQL для добавления колонки balance_usd в существующие таблицы (миграция)
+_ADD_BALANCE_USD_SQL = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_usd DOUBLE PRECISION DEFAULT 0.0"
+)
+
 
 def get_async_database_url(sync_url: str) -> str:
     """
@@ -51,10 +56,7 @@ async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-                # Добавить колонку balance_usd, если таблица users уже была без неё (миграция)
-                await conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_usd DOUBLE PRECISION DEFAULT 0.0"
-                ))
+                await conn.execute(text(_ADD_BALANCE_USD_SQL))
             break
         except Exception as e:
             last_error = e
@@ -68,6 +70,21 @@ async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
         autoflush=False,
     )
     return session_factory
+
+
+async def ensure_balance_usd_column(database_url: str) -> None:
+    """
+    Отдельно добавляет колонку balance_usd, если её нет.
+    Вызывать после init_db при каждом старте (на случай старой сборки или пропущенной миграции).
+    """
+    engine = create_engine(database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(_ADD_BALANCE_USD_SQL))
+    except Exception:
+        raise
+    finally:
+        await engine.dispose()
 
 
 async def get_session(

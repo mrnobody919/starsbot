@@ -14,9 +14,9 @@ class DatabaseConfig:
 
     @classmethod
     def from_env(cls) -> "DatabaseConfig":
-        return cls(
-            url=os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/stars_bot")
-        )
+        # Приватный URL (Railway) не тарифицирует egress; публичный — даёт платный трафик
+        url = os.getenv("DATABASE_PRIVATE_URL") or os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/stars_bot")
+        return cls(url=url)
 
 
 @dataclass

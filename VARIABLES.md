@@ -9,10 +9,12 @@
 | Переменная   | Пример значения        | Откуда взять |
 |-------------|-------------------------|--------------|
 | `BOT_TOKEN` | `8714948872:AAGyPC6_...` | @BotFather → токен бота |
-| `DATABASE_URL` | `postgresql://...` | Railway: сервис PostgreSQL → Connect → скопировать URL (часто подтягивается сам) |
+| `DATABASE_URL` или `DATABASE_PRIVATE_URL` | `postgresql://...` | **Лучше приватный URL** (без egress): в сервисе PostgreSQL скопировать **Private** URL. Если используете публичный (`DATABASE_PUBLIC_URL`) — будет платный исходящий трафик. |
 | `ADMIN_IDS` | `1200042735` | Ваш Telegram ID (несколько через запятую: `123,456`) |
 
 **BOT_USERNAME** (рекомендуется): имя бота без @, например `thexstarsbot` — для реферальных ссылок.
+
+**Важно:** Бот подключается по **приватному** URL, если задан `DATABASE_PRIVATE_URL` (так не начисляется egress в Railway). Иначе используется `DATABASE_URL`. Укажите URL из сервиса PostgreSQL (Private — в панели БД, вкладка Variables или Connect → Private). Если бот падает с «Temporary failure in name resolution» — проверьте, что хост не localhost. До 5 попыток подключения с паузой 5 сек (`DB_CONNECT_ATTEMPTS`, `DB_CONNECT_DELAY` — по желанию).
 
 ---
 

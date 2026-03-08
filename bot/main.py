@@ -19,7 +19,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from bot.config import load_config
-from bot.database import init_db
+from bot.database import init_db, ensure_balance_usd_column
 from bot.middlewares import AntifloodMiddleware, DbSessionMiddleware
 from bot.handlers import start, buy_stars, payments, profile, referrals, admin
 from bot.services.price_engine import PriceEngine
@@ -35,6 +35,8 @@ async def main():
     """Запуск бота."""
     config = load_config()
     session_factory = await init_db(config.database.url)
+    # Гарантированно добавить колонку balance_usd при каждом старте (миграция для старых БД)
+    await ensure_balance_usd_column(config.database.url)
 
     bot = Bot(
         token=config.bot.token,

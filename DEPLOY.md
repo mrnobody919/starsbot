@@ -28,7 +28,7 @@
 | `BOT_TOKEN` | Токен от @BotFather |
 | `BOT_USERNAME` | Имя бота без @ (например `thexstarsbot`) |
 | `ADMIN_IDS` | Ваш Telegram ID (число), можно несколько через запятую |
-| `DATABASE_URL` | Скопировать из сервиса PostgreSQL (часто подставляется автоматически по ссылке **Connect**) |
+| `DATABASE_PRIVATE_URL` или `DATABASE_URL` | Из сервиса PostgreSQL взять **приватный** URL (Private), чтобы не платить за egress. Бот сначала использует `DATABASE_PRIVATE_URL`, если он задан. |
 | `FREEKASSA_MERCHANT_ID` | ID магазина из FreeKassa |
 | `FREEKASSA_SECRET_WORD_1` | Секретное слово 1 |
 | `FREEKASSA_SECRET_WORD_2` | Секретное слово 2 |
