@@ -220,7 +220,8 @@ async def confirm_and_pay(
 
     if method == "ton":
         ton = TonService(config.ton)
-        if ton.enabled and quote_ton := data.get("quote_ton"):
+        quote_ton = data.get("quote_ton")
+        if ton.enabled and quote_ton:
             link = ton.build_payment_link(quote_ton, f"order_{order.id}")
             if link:
                 order.external_payment_id = f"ton_{order.id}"
