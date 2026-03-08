@@ -27,17 +27,18 @@ async def show_referrals(callback: CallbackQuery, session: AsyncSession, config:
         await safe_callback_answer(callback, "Ошибка.", show_alert=True)
         return
 
-    bot_username = config.bot.bot_username or "your_bot"
+    bot_username = (config.bot.bot_username or "your_bot").lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
     percent = int(config.referral_percent)
+    referral_usd = getattr(user, "referral_reward_total", 0.0) or 0.0
 
     text = (
         f"👥 <b>Реферальная программа</b>\n\n"
-        f"Приглашайте друзей по ссылке — вы получаете <b>{percent}%</b> от суммы Stars, "
-        f"которые они купят (начисляется бонусами на ваш счёт).\n\n"
+        f"Приглашайте друзей по ссылке — вы получаете <b>{percent}%</b> от суммы покупок "
+        f"ваших рефералов (начисляется в $ на баланс в боте).\n\n"
         f"🔗 Ваша ссылка:\n<code>{ref_link}</code>\n\n"
         f"👥 Приглашено: {user.referrals_count}\n"
-        f"💰 Получено бонусов: {user.referral_reward_total:.0f} ⭐"
+        f"💰 Всего получено от рефералов: {referral_usd:.2f}$"
     )
     await callback.message.edit_text(text, reply_markup=back_to_menu_kb(), parse_mode="HTML")
     await safe_callback_answer(callback)

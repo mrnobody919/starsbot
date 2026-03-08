@@ -30,7 +30,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
         await safe_callback_answer(callback, "Ошибка: пользователь не найден.", show_alert=True)
         return
 
-    bot_username = config.bot.bot_username or "your_bot"
+    bot_username = (config.bot.bot_username or "your_bot").lstrip("@")
     ref_link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
 
     # Успешные заказы и куплено звезд
@@ -44,17 +44,20 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
     total_orders = row.total_orders or 0
     total_stars = int(row.total_stars or 0)
     balance_usd = getattr(user, "balance_usd", 0.0) or 0.0
-    balance_rub = round(balance_usd * 100)  # примерный курс 1 USD ≈ 100 ₽
+    referral_usd = getattr(user, "referral_reward_total", 0.0) or 0.0
 
     text = (
-        f"👤 <b>Мой профиль</b>\n\n"
-        f"💵 <b>Баланс:</b> {balance_usd:.2f} $ ({balance_rub} ₽)\n\n"
-        f"🆔 ID: <code>{user.telegram_id}</code>\n"
-        f"🔗 Реферальная ссылка:\n<code>{ref_link}</code>\n\n"
-        f"👥 Рефералов: {user.referrals_count}\n"
-        f"💰 Бонусы (10% с рефералов): {user.referral_reward_total:.0f} ⭐\n\n"
-        f"✅ Успешных заказов: {total_orders}\n"
-        f"⭐ Куплено звезд: {format_stars(total_stars)}\n"
+        "👤 <b>Ваш профиль</b>\n\n"
+        f"🆔 UUID Профиля: <code>{user.telegram_id}</code>\n\n"
+        f"💰 Текущий баланс (в боте): {balance_usd:.2f}$\n\n"
+        "🚀 <b>Реферальная система</b>\n"
+        "<i>Получай +10% от прибыли сервиса за покупки ваших рефералов!</i>\n"
+        f"👬 <b>Всего рефералов:</b> {user.referrals_count}\n"
+        f"📌 Всего получено от рефералов: {referral_usd:.2f}$\n"
+        f"🔗 Ваша реферальная ссылка:\n<code>{ref_link}</code>\n\n"
+        "📊 <b>Статистика</b>\n"
+        f"📦 Успешных заказов: {total_orders}\n"
+        f"⭐ Куплено звёзд: {format_stars(total_stars)}\n"
     )
     await callback.message.edit_text(text, reply_markup=profile_kb(), parse_mode="HTML")
     await safe_callback_answer(callback)

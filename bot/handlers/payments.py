@@ -106,18 +106,18 @@ async def successful_payment(message: Message, session: AsyncSession, config: Ap
     )
     user = await session.get(User, order.user_id)
     if user:
-        # Реферальный бонус 10%
+        # Реферальное начисление 10% в долларах (от суммы заказа)
         if user.referred_by:
             referrer = await session.get(User, user.referred_by)
             if referrer:
-                reward = order.stars_amount * (config.referral_percent / 100)
-                referrer.referral_reward_total += reward
-                referrer.balance_stars += reward
+                reward_usd = order.price * (config.referral_percent / 100)
+                referrer.referral_reward_total += reward_usd
+                referrer.balance_usd = getattr(referrer, "balance_usd", 0.0) + reward_usd
                 session.add(
                     Referral(
                         referrer_id=referrer.id,
                         referred_user_id=user.id,
-                        reward=reward,
+                        reward=reward_usd,
                         order_id=order.id,
                     )
                 )
@@ -150,14 +150,14 @@ async def handle_freekassa_paid(
         if user.referred_by:
             referrer = await session.get(User, user.referred_by)
             if referrer:
-                reward = order.stars_amount * (config.referral_percent / 100)
-                referrer.referral_reward_total += reward
-                referrer.balance_stars += reward
+                reward_usd = order.price * (config.referral_percent / 100)
+                referrer.referral_reward_total += reward_usd
+                referrer.balance_usd = getattr(referrer, "balance_usd", 0.0) + reward_usd
                 session.add(
                     Referral(
                         referrer_id=referrer.id,
                         referred_user_id=user.id,
-                        reward=reward,
+                        reward=reward_usd,
                         order_id=order.id,
                     )
                 )
