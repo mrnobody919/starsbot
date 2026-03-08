@@ -73,12 +73,12 @@ async def main():
     dp.pre_checkout_query.middleware(ConfigMiddleware())
 
     # Роутеры
-    dp.include_router(start.router, name="start")
-    dp.include_router(buy_stars.router, name="buy")
-    dp.include_router(profile.router, name="profile")
-    dp.include_router(referrals.router, name="referrals")
-    dp.include_router(payments.router, name="payments")
-    dp.include_router(admin.router, name="admin")
+    dp.include_router(start.router)
+    dp.include_router(buy_stars.router)
+    dp.include_router(profile.router)
+    dp.include_router(referrals.router)
+    dp.include_router(payments.router)
+    dp.include_router(admin.router)
 
     # Webhook-сервер для FreeKassa (на Railway используется PORT, иначе WEBHOOK_PORT или 8080)
     webhook_port = int(os.getenv("PORT") or os.getenv("WEBHOOK_PORT", "8080"))
