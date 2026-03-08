@@ -31,6 +31,7 @@ class User(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     balance_stars: Mapped[float] = mapped_column(Float, default=0.0)
+    balance_usd: Mapped[float] = mapped_column(Float, default=0.0)  # баланс в USD для покупки Stars
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     referred_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     referral_reward_total: Mapped[float] = mapped_column(Float, default=0.0)

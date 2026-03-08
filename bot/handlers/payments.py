@@ -167,3 +167,42 @@ async def handle_freekassa_paid(
             await _notify_admins_new_order(bot, config.admin_ids, order, user)
     logger.info("Order %s paid (FreeKassa)", order_id)
     return True
+
+
+async def handle_freekassa_topup(
+    session: AsyncSession,
+    bot: Bot,
+    config: AppConfig,
+    order_id_str: str,
+    amount_rub: float,
+) -> bool:
+    """
+    Обработка webhook FreeKassa для пополнения баланса.
+    order_id_str вида "topup_{user_id}_{uuid}". Зачисляем amount_rub/100 USD на balance_usd.
+    """
+    if not order_id_str.startswith("topup_"):
+        return False
+    parts = order_id_str.split("_")
+    if len(parts) < 3:
+        return False
+    try:
+        user_id = int(parts[1])
+    except ValueError:
+        return False
+    user = await session.get(User, user_id)
+    if not user:
+        logger.warning("Topup webhook: user id %s not found", user_id)
+        return False
+    rate = getattr(config, "rub_per_usd", 100.0) or 100.0
+    amount_usd = amount_rub / rate
+    user.balance_usd = (user.balance_usd or 0) + amount_usd
+    await session.flush()
+    try:
+        await bot.send_message(
+            user.telegram_id,
+            f"✅ На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.0f} ₽). Спасибо за пополнение!",
+        )
+    except Exception as e:
+        logger.warning("Notify user %s about topup failed: %s", user.telegram_id, e)
+    logger.info("Topup: user_id=%s amount_usd=%.2f", user_id, amount_usd)
+    return True

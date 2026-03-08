@@ -43,9 +43,12 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
     row = orders_result.one()
     total_orders = row.total_orders or 0
     total_stars = int(row.total_stars or 0)
+    balance_usd = getattr(user, "balance_usd", 0.0) or 0.0
+    balance_rub = round(balance_usd * 100)  # примерный курс 1 USD ≈ 100 ₽
 
     text = (
         f"👤 <b>Мой профиль</b>\n\n"
+        f"💵 <b>Баланс:</b> {balance_usd:.2f} $ ({balance_rub} ₽)\n\n"
         f"🆔 ID: <code>{user.telegram_id}</code>\n"
         f"🔗 Реферальная ссылка:\n<code>{ref_link}</code>\n\n"
         f"👥 Рефералов: {user.referrals_count}\n"

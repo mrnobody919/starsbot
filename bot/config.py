@@ -139,6 +139,7 @@ class AppConfig:
     referral_percent: float = 10.0
     support_link: Optional[str] = None
     webhook_base_url: Optional[str] = None  # для FreeKassa webhook на Railway
+    rub_per_usd: float = 100.0  # курс ₽/USD для пополнения баланса из FreeKassa
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -155,7 +156,8 @@ class AppConfig:
             admin_ids=admin_ids,
             referral_percent=float(os.getenv("REFERRAL_PERCENT", "10")),
             support_link=os.getenv("SUPPORT_LINK"),
-            webhook_base_url=os.getenv("WEBHOOK_BASE_URL")
+            webhook_base_url=os.getenv("WEBHOOK_BASE_URL"),
+            rub_per_usd=float(os.getenv("RUB_PER_USD", "100")),
         )
 
 

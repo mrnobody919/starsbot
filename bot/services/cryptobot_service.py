@@ -37,7 +37,7 @@ class CryptoBotService:
         user_id: int,
     ) -> Optional[dict[str, Any]]:
         """
-        Создаёт инвойс в CryptoBot.
+        Создаёт инвойс в CryptoBot (Stars).
         payload — строка для идентификации заказа (например order_123).
         Возвращает данные инвойса или None при ошибке.
         """
@@ -66,6 +66,42 @@ class CryptoBotService:
                 return data.get("result")
         except Exception as e:
             logger.exception("CryptoBot createInvoice: %s", e)
+            return None
+
+    async def create_invoice_usdt(
+        self,
+        amount_usd: float,
+        description: str,
+        payload: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Создаёт инвойс на пополнение в USDT (Crypto Pay).
+        Возвращает result с pay_url, invoice_id и т.д. или None.
+        """
+        if not self._enabled:
+            return None
+        try:
+            amount_str = f"{amount_usd:.2f}"
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.post(
+                    f"{CRYPTOBOT_API}/createInvoice",
+                    headers=self._headers(),
+                    json={
+                        "asset": "USDT",
+                        "amount": amount_str,
+                        "description": description,
+                        "payload": payload,
+                    },
+                )
+                if r.status_code != 200:
+                    logger.warning("CryptoBot createInvoice USDT error: %s %s", r.status_code, r.text)
+                    return None
+                data = r.json()
+                if not data.get("ok"):
+                    return None
+                return data.get("result")
+        except Exception as e:
+            logger.exception("CryptoBot create_invoice_usdt: %s", e)
             return None
 
     def verify_update(self, update_dict: dict, secret: Optional[str] = None) -> bool:

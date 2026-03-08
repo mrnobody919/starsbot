@@ -46,15 +46,16 @@
 
 ### 6. Публичный URL и FreeKassa
 
-1. В **Settings** сервиса бота откройте **Networking** → **Generate Domain**.
-2. Появится адрес вида `https://ваш-сервис.up.railway.app`.
-3. В **Variables** добавьте (или измените):
-   - `WEBHOOK_BASE_URL` = `https://ваш-сервис.up.railway.app`
-4. В личном кабинете **FreeKassa** в поле **URL оповещения** укажите:
-   - `https://ваш-сервис.up.railway.app/webhook/freekassa`
+1. В **Settings** сервиса бота откройте **Networking** → **Generate Domain**. Railway выдаст домен, например: `web-production-59ae8.up.railway.app`.
+2. **Variables создаются вручную.** Откройте вкладку **Variables** у сервиса бота и нажмите **+ New Variable** (или **Add Variable**). Добавьте переменную:
+   - **Имя:** `WEBHOOK_BASE_URL`
+   - **Значение:** `https://web-production-59ae8.up.railway.app` (подставьте свой домен из шага 1, обязательно с `https://`).
+   Сохранённых переменных из шага 4 (BOT_TOKEN, FREEKASSA_* и т.д.) это не заменяет — добавляется ещё одна строка.
+3. В личном кабинете **FreeKassa** в поле **URL оповещения** укажите:
+   - `https://web-production-59ae8.up.railway.app/webhook/freekassa` (свой домен из шага 1).
    - Метод: **GET** (или POST — оба поддерживаются).
 
-После каждого пуша в GitHub Railway будет пересобирать и перезапускать бота.
+После каждого пуша в GitHub Railway будет пересобирать и перезапускать бота. 
 
 ---
 

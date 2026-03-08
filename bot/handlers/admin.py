@@ -43,6 +43,7 @@ async def _log_admin(session: AsyncSession, admin_id: int, action: str, details:
 async def admin_entry(message: Message, session: AsyncSession, config: AppConfig):
     """Вход в админ-панель по команде /admin."""
     if not _is_admin(message.from_user.id, config):
+        await message.answer("Доступ запрещён. Ваш ID не в списке администраторов.")
         return
     await message.answer("🔐 Админ-панель", reply_markup=admin_main_kb())
 

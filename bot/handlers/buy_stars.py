@@ -14,12 +14,15 @@ from bot.keyboards import back_to_menu_kb
 from bot.keyboards.buy import (
     payment_method_kb,
     confirm_order_kb,
+    topup_methods_kb,
+    cryptobot_pay_button_kb,
 )
 from bot.config import AppConfig
 from bot.services.price_engine import PriceEngine
 from bot.services.antifraud import AntifraudService
 from bot.services.freekassa_service import FreeKassaService
 from bot.services.ton_service import TonService
+from bot.services.cryptobot_service import CryptoBotService
 from bot.utils.helpers import format_stars, format_price, validate_stars_input
 from bot.utils.logger import get_logger
 
@@ -64,7 +67,7 @@ async def process_amount(
     session: AsyncSession,
     config: AppConfig,
 ):
-    """Обработка введённого количества Stars."""
+    """Обработка введённого количества Stars. Проверка баланса перед выбором оплаты."""
     ok, value, err = validate_stars_input(
         message.text,
         config.antifraud.min_stars_per_order,
@@ -77,8 +80,29 @@ async def process_amount(
     engine = _get_price_engine(config)
     quote = await engine.quote(value)
     await state.update_data(stars=value, quote_usd=quote.amount_usd, quote_ton=quote.amount_ton)
-    await state.set_state(BuyStates.choosing_payment)
 
+    # Проверка баланса пользователя
+    result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+    db_user = result.scalar_one_or_none()
+    balance_usd = (db_user.balance_usd if db_user else 0.0) or 0.0
+    if db_user is None:
+        from bot.database.repository import get_or_create_user
+        db_user, _ = await get_or_create_user(session, message.from_user.id, message.from_user.username)
+        await session.flush()
+
+    if balance_usd < quote.amount_usd:
+        shortage = quote.amount_usd - balance_usd
+        shortage_rub = round(shortage * 100)
+        await state.update_data(shortage_usd=shortage)
+        await state.set_state(BuyStates.choosing_payment)
+        text = (
+            f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
+            f"👇🏻 Выберите способ пополнения из предложенных: 👇🏻"
+        )
+        await message.answer(text, reply_markup=topup_methods_kb())
+        return
+
+    await state.set_state(BuyStates.choosing_payment)
     text = (
         f"⭐ <b>{format_stars(value)}</b>\n\n"
         f"Стоимость: {format_price(quote.amount_usd)}"
@@ -243,18 +267,155 @@ async def confirm_and_pay(
         return
 
     if method == "cryptobot":
-        # CryptoBot: можно отправить invoice через Bot API (Stars) или использовать CryptoBot API
-        await callback.answer(
-            "Оплата через CryptoBot: используйте кнопку оплаты в боте или перейдите в @CryptoBot.",
-            show_alert=True,
-        )
+        crypto = CryptoBotService(config.cryptobot)
+        if crypto.enabled:
+            result = await crypto.create_invoice(
+                amount_stars=stars,
+                description=f"Заказ #{order.id} — {stars} Stars",
+                payload=f"order_{order.id}",
+                user_id=callback.from_user.id,
+            )
+            if result:
+                pay_url = result.get("pay_url") or result.get("bot_invoice_url")
+                invoice_id = result.get("invoice_id", "")
+                if not pay_url and invoice_id:
+                    pay_url = f"https://t.me/CryptoBot/app?startapp=invoice-{invoice_id}&mode=compact"
+                if pay_url:
+                    amount_usd = order.price
+                    text = (
+                        f"⚡️ Оплата заказа #{order.id}: {format_stars(stars)} — ${amount_usd:.2f} ( USDT)\n"
+                        f"❗️ Комиссия Cryptobot составляет ~3%\n"
+                        f"ID счёта: <code>{invoice_id}</code>\n\n"
+                        f"💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
+                        f"Счёт для оплаты действителен 60 минут!"
+                    )
+                    await callback.message.edit_text(
+                        text,
+                        reply_markup=cryptobot_pay_button_kb(pay_url),
+                        parse_mode="HTML",
+                    )
+                    await state.clear()
+                    await callback.answer()
+                    return
         await callback.message.edit_text(
             f"Заказ #{order.id}. Оплатите {stars} Stars через @CryptoBot или выберите другой способ.",
             reply_markup=back_to_menu_kb(),
         )
         await state.clear()
+        await callback.answer()
         return
 
+    await callback.answer()
+
+
+# --- Пополнение баланса (topup) ---
+@router.callback_query(BuyStates.choosing_payment, F.data == "topup:cryptobot")
+async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Пополнение через Cryptobot: создаём инвойс USDT и показываем кнопку «Перейти к оплате»."""
+    data = await state.get_data()
+    amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
+    if amount_usd <= 0:
+        await callback.answer("Введите количество Stars заново.", show_alert=True)
+        return
+    crypto = CryptoBotService(config.cryptobot)
+    if not crypto.enabled:
+        await callback.answer("Cryptobot временно недоступен.", show_alert=True)
+        return
+    import time
+    payload = f"topup_{callback.from_user.id}_{int(time.time())}"
+    result = await crypto.create_invoice_usdt(
+        amount_usd=amount_usd,
+        description=f"Пополнение баланса на ${amount_usd:.2f}",
+        payload=payload,
+    )
+    if not result:
+        await callback.answer("Ошибка создания счёта Cryptobot.", show_alert=True)
+        return
+    pay_url = result.get("pay_url") or result.get("bot_invoice_url")
+    invoice_id = result.get("invoice_id", "")
+    if not pay_url:
+        pay_url = f"https://t.me/CryptoBot/app?startapp=invoice-{invoice_id}&mode=compact"
+    amount_usdt = amount_usd  # ~1:1
+    text = (
+        f"⚡️ Пополнение баланса на: ${amount_usd:.2f} ( {amount_usdt:.2f} USDT)\n"
+        f"❗️ Комиссия Cryptobot составляет ~3%\n"
+        f"ID счёта: <code>{invoice_id}</code>\n\n"
+        f"💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
+        f"Счёт для оплаты действителен 60 минут!"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=cryptobot_pay_button_kb(pay_url),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(BuyStates.choosing_payment, F.data == "topup:ton")
+async def topup_ton(callback: CallbackQuery, state: FSMContext, config: AppConfig):
+    """Пополнение через TON: ссылка на перевод."""
+    data = await state.get_data()
+    amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
+    ton = TonService(config.ton)
+    if not ton.enabled:
+        await callback.answer("TON временно недоступен.", show_alert=True)
+        return
+    # Курс TON/USD из price engine
+    engine = _get_price_engine(config)
+    ton_usd = await engine.get_ton_usd()
+    quote_ton = amount_usd / ton_usd if ton_usd and ton_usd > 0 else amount_usd / 5.0
+    link = ton.build_payment_link(quote_ton, "topup")
+    if not link:
+        await callback.answer("Не удалось сформировать ссылку TON.", show_alert=True)
+        return
+    text = f"🔹 Пополнение баланса на ${amount_usd:.2f}\n\nПереведите ~{quote_ton:.4f} TON по ссылке ниже:"
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Перейти к оплате TON", url=link)],
+        [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(BuyStates.choosing_payment, F.data == "topup:usdt_ton")
+async def topup_usdt_ton(callback: CallbackQuery, state: FSMContext, config: AppConfig):
+    """Пополнение USDT в сети TON — пока перенаправляем на Cryptobot или TON."""
+    await callback.answer("Используйте Cryptobot или TON для пополнения USDT.", show_alert=True)
+
+
+@router.callback_query(BuyStates.choosing_payment, F.data == "topup:sbp")
+async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Пополнение через СБП (FreeKassa)."""
+    if not config.freekassa.enabled:
+        await callback.answer("СБП (FreeKassa) временно недоступен.", show_alert=True)
+        return
+    data = await state.get_data()
+    amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
+    amount_rub = round(amount_usd * 100)
+    from bot.database.repository import get_or_create_user
+    db_user, _ = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
+    await session.flush()
+    import uuid
+    order_id = f"topup_{db_user.id}_{uuid.uuid4().hex[:8]}"
+    fk = FreeKassaService(config.freekassa)
+    notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa" if config.webhook_base_url else None
+    pay_url = await fk.create_order(
+        amount=amount_rub,
+        currency="RUB",
+        order_id=order_id,
+        notification_url=notification_url,
+    )
+    if not pay_url:
+        await callback.answer("Ошибка создания платежа СБП.", show_alert=True)
+        return
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    text = f"💳 Пополнение баланса на {amount_rub} ₽\n\nОплатите по ссылке (СБП / карта):"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Перейти к оплате СБП", url=pay_url)],
+        [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
+    ])
+    await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 
