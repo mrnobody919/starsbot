@@ -14,6 +14,11 @@ logger = get_logger(__name__)
 
 CRYPTOBOT_API = "https://pay.crypt.bot/api"
 
+# Ссылка для оплаты в приложении CryptoBot (компактный режим)
+def build_invoice_app_url(invoice_id: str) -> str:
+    """Формирует ссылку вида https://t.me/CryptoBot/app?startapp=invoice-XXX&mode=compact."""
+    return f"https://t.me/CryptoBot/app?startapp=invoice-{invoice_id}&mode=compact"
+
 
 class CryptoBotService:
     """Работа с CryptoBot API для приёма Stars."""

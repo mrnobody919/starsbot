@@ -22,7 +22,7 @@ from bot.services.price_engine import PriceEngine
 from bot.services.antifraud import AntifraudService
 from bot.services.freekassa_service import FreeKassaService
 from bot.services.ton_service import TonService
-from bot.services.cryptobot_service import CryptoBotService
+from bot.services.cryptobot_service import CryptoBotService, build_invoice_app_url
 from bot.utils.helpers import format_stars, format_price, validate_stars_input
 from bot.utils.logger import get_logger
 
@@ -276,10 +276,8 @@ async def confirm_and_pay(
                 user_id=callback.from_user.id,
             )
             if result:
-                pay_url = result.get("pay_url") or result.get("bot_invoice_url")
                 invoice_id = result.get("invoice_id", "")
-                if not pay_url and invoice_id:
-                    pay_url = f"https://t.me/CryptoBot/app?startapp=invoice-{invoice_id}&mode=compact"
+                pay_url = build_invoice_app_url(invoice_id) if invoice_id else (result.get("pay_url") or result.get("bot_invoice_url"))
                 if pay_url:
                     amount_usd = order.price
                     text = (
@@ -331,10 +329,8 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     if not result:
         await callback.answer("Ошибка создания счёта Cryptobot.", show_alert=True)
         return
-    pay_url = result.get("pay_url") or result.get("bot_invoice_url")
     invoice_id = result.get("invoice_id", "")
-    if not pay_url:
-        pay_url = f"https://t.me/CryptoBot/app?startapp=invoice-{invoice_id}&mode=compact"
+    pay_url = build_invoice_app_url(invoice_id) if invoice_id else (result.get("pay_url") or result.get("bot_invoice_url"))
     amount_usdt = amount_usd  # ~1:1
     text = (
         f"⚡️ Пополнение баланса на: ${amount_usd:.2f} ( {amount_usdt:.2f} USDT)\n"
