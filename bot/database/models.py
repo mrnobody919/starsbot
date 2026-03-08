@@ -55,6 +55,7 @@ class Order(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    recipient_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # для подарка: кому отправлять Stars
     stars_amount: Mapped[int] = mapped_column(Integer)
     price: Mapped[float] = mapped_column(Float)
     payment_method: Mapped[str] = mapped_column(String(32))  # cryptobot, ton, freekassa

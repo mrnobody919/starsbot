@@ -12,10 +12,14 @@ from bot.database.models import User, Order
 from bot.database.repository import get_or_create_user as get_user
 from bot.keyboards import back_to_menu_kb
 from bot.keyboards.buy import (
+    recipient_choice_kb,
+    back_to_recipient_kb,
     payment_method_kb,
     confirm_order_kb,
     topup_methods_kb,
     cryptobot_pay_button_kb,
+    sbp_pay_button_kb,
+    ton_pay_button_kb,
 )
 from bot.config import AppConfig
 from bot.services.price_engine import PriceEngine
@@ -33,6 +37,8 @@ router = Router(name="buy_stars")
 
 class BuyStates(StatesGroup):
     """Состояния FSM для покупки."""
+    choosing_recipient = State()
+    entering_recipient_username = State()
     entering_amount = State()
     choosing_payment = State()
     confirmed = State()
@@ -48,16 +54,87 @@ def _get_antifraud(config: AppConfig) -> AntifraudService:
 
 @router.callback_query(F.data == "menu:buy")
 async def start_buy(callback: CallbackQuery, state: FSMContext):
-    """Начало покупки: просим ввести количество Stars."""
+    """Начало покупки: выбор получателя (себе / другу)."""
     await state.clear()
-    await state.set_state(BuyStates.entering_amount)
+    await state.set_state(BuyStates.choosing_recipient)
     await callback.message.edit_text(
-        "🛒 <b>Купить Stars</b>\n\n"
-        "Введите количество Stars (от 50 до 50 000):",
-        reply_markup=back_to_menu_kb(),
+        "✨ <b>Выбор имени пользователя</b>\n\n"
+        "Выберите, кому вы хотите купить Telegram Stars",
+        reply_markup=recipient_choice_kb(),
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.callback_query(BuyStates.choosing_recipient, F.data == "buy:recipient_self")
+async def buy_for_self(callback: CallbackQuery, state: FSMContext):
+    """Купить себе: показываем получателя (никнейм) и просим ввести количество."""
+    await state.set_state(BuyStates.entering_amount)
+    username = callback.from_user.username or callback.from_user.first_name or "Вы"
+    if isinstance(username, str) and not username.startswith("@"):
+        display = f"@{username}" if callback.from_user.username else username
+    else:
+        display = username
+    await state.update_data(recipient_type="self", recipient_username=None, recipient_display=display)
+    await callback.message.edit_text(
+        f"👤 Получатель: {display}\n\n"
+        "💫 Введите количество звезд, которое хотите купить:\n\n"
+        "📌 Минимальная сумма покупки - от 50 звёзд",
+        reply_markup=back_to_recipient_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(BuyStates.choosing_recipient, F.data == "buy:recipient_gift")
+async def buy_for_gift(callback: CallbackQuery, state: FSMContext):
+    """Подарить другу: просим ввести @username."""
+    await state.set_state(BuyStates.entering_recipient_username)
+    await callback.message.edit_text(
+        "👤 <b>Введите @username пользователя,\n"
+        "которому вы хотите подарить Telegram\nStars:</b>",
+        reply_markup=back_to_recipient_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "buy:back_recipient")
+async def back_to_recipient_choice(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору получателя (себе / другу)."""
+    await state.set_state(BuyStates.choosing_recipient)
+    await callback.message.edit_text(
+        "✨ <b>Выбор имени пользователя</b>\n\n"
+        "Выберите, кому вы хотите купить Telegram Stars",
+        reply_markup=recipient_choice_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(BuyStates.entering_recipient_username, F.text)
+async def process_recipient_username(message: Message, state: FSMContext):
+    """Обработка введённого @username для подарка."""
+    text = (message.text or "").strip()
+    username = text.lstrip("@") if text else ""
+    if not username or len(username) < 2:
+        await message.answer("Введите корректный username (например @username или username):")
+        return
+    if len(username) > 32:
+        await message.answer("Слишком длинный username. Введите снова:")
+        return
+    display = f"@{username}" if not username.startswith("@") else username
+    if not display.startswith("@"):
+        display = f"@{display}"
+    await state.update_data(recipient_type="gift", recipient_username=username, recipient_display=display)
+    await state.set_state(BuyStates.entering_amount)
+    await message.answer(
+        f"👤 Получатель: {display}\n\n"
+        "💫 Введите количество звезд, которое хотите купить:\n\n"
+        "📌 Минимальная сумма покупки - от 50 звёзд",
+        reply_markup=back_to_recipient_kb(),
+        parse_mode="HTML",
+    )
 
 
 @router.message(BuyStates.entering_amount, F.text)
@@ -92,14 +169,21 @@ async def process_amount(
 
     if balance_usd < quote.amount_usd:
         shortage = quote.amount_usd - balance_usd
-        shortage_rub = round(shortage * 100)
+        rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
+        shortage_rub = round(shortage * rub_per_usd)
         await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
         text = (
             f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
-            f"👇🏻 Выберите способ пополнения из предложенных: 👇🏻"
+            "👇🏻 Выберите способ пополнения из предложенных: 👇🏻\n\n"
+            "💳 СБП — оплата рублями через QR-код\n"
+            "💳 Карты — оплата рублями банковской картой\n"
+            "🔹 TON — оплата через нативный токен сети TON\n"
+            "💸 USDT TON — оплата через USDT в сети TON\n"
+            "💎 Cryptobot — оплата через Cryptobot\n"
+            "🔸 Другая криптовалюта — оплата в любой криптовалюте"
         )
-        await message.answer(text, reply_markup=topup_methods_kb())
+        await message.answer(text, reply_markup=topup_methods_kb(config.freekassa.enabled))
         return
 
     await state.set_state(BuyStates.choosing_payment)
@@ -156,10 +240,13 @@ async def choose_payment(
         await callback.answer(msg, show_alert=True)
         return
 
+    # Для подарка сохраняем @username получателя; для «купить себе» — None
+    recipient_username = data.get("recipient_display") if data.get("recipient_type") == "gift" else None
     # Создаём заказ в БД (pending)
     order = Order(
         user_id=db_user.id,
         username=callback.from_user.username,
+        recipient_username=recipient_username,
         stars_amount=stars,
         price=quote_usd if method != "freekassa" else quote_usd,
         payment_method=method,
@@ -342,11 +429,11 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     invoice_id = result.get("invoice_id", "")
     amount_usdt = amount_usd  # ~1:1
     text = (
-        f"⚡️ Пополнение баланса на: ${amount_usd:.2f} ( {amount_usdt:.2f} USDT)\n"
-        f"❗️ Комиссия Cryptobot составляет ~3%\n"
+        f"⚡️ Пополнение баланса на: {amount_usd:.2f}$ ({amount_usdt:.2f} USDT)\n"
+        "❗️ Комиссия Cryptobot составляет ~3%\n"
         f"ID счёта: <code>{invoice_id}</code>\n\n"
-        f"💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
-        f"Счёт для оплаты действителен 60 минут!"
+        "💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
+        "Счёт для оплаты действителен 60 минут!"
     )
     await callback.message.edit_text(
         text,
@@ -358,28 +445,32 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
 
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:ton")
 async def topup_ton(callback: CallbackQuery, state: FSMContext, config: AppConfig):
-    """Пополнение через TON: ссылка на перевод."""
+    """Пополнение через TON. Без комиссии."""
     data = await state.get_data()
     amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
+    import uuid
+    order_id = f"topup_ton_{callback.from_user.id}_{uuid.uuid4().hex[:8]}"
     ton = TonService(config.ton)
     if not ton.enabled:
         await callback.answer("TON временно недоступен.", show_alert=True)
         return
-    # Курс TON/USD из price engine
     engine = _get_price_engine(config)
     ton_usd = await engine.get_ton_usd()
     quote_ton = amount_usd / ton_usd if ton_usd and ton_usd > 0 else amount_usd / 5.0
-    link = ton.build_payment_link(quote_ton, "topup")
+    link = ton.build_payment_link(quote_ton, order_id)
     if not link:
         await callback.answer("Не удалось сформировать ссылку TON.", show_alert=True)
         return
-    text = f"🔹 Пополнение баланса на ${amount_usd:.2f}\n\nПереведите ~{quote_ton:.4f} TON по ссылке ниже:"
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Перейти к оплате TON", url=link)],
-        [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
-    ])
-    await callback.message.edit_text(text, reply_markup=kb)
+    wallet = config.ton.wallet_address or ""
+    text = (
+        f"⚡️ Пополнение баланса на: {amount_usd:.2f}$\n"
+        f"ID счёта: <code>{order_id}</code>\n\n"
+        f"💷 Переведите ТОЧНУЮ СУММУ: {quote_ton:.4f} TON\n\n"
+        f"👛 На кошелёк:\n<code>{wallet}</code>\n\n"
+        "После транзакции бот автоматически подтвердит Ваш платёж\n\n"
+        "Счёт для оплаты действителен 60 минут!"
+    )
+    await callback.message.edit_text(text, reply_markup=ton_pay_button_kb(link), parse_mode="HTML")
     await callback.answer()
 
 
@@ -391,18 +482,19 @@ async def topup_usdt_ton(callback: CallbackQuery, state: FSMContext, config: App
 
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:sbp")
 async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Пополнение через СБП (FreeKassa). Сразу отвечаем на callback, чтобы не истёк таймаут."""
+    """Пополнение через СБП (FreeKassa). Комиссия 4%."""
     if not config.freekassa.enabled:
         await callback.answer("СБП (FreeKassa) временно недоступен.", show_alert=True)
         return
     await callback.answer("Создаём ссылку на оплату...")
     data = await state.get_data()
     amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
-    amount_rub = round(amount_usd * 100)
+    rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
+    amount_rub = round(amount_usd * rub_per_usd)
     from bot.database.repository import get_or_create_user
+    import uuid
     db_user, _ = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
     await session.flush()
-    import uuid
     order_id = f"topup_{db_user.id}_{uuid.uuid4().hex[:8]}"
     fk = FreeKassaService(config.freekassa)
     notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa" if config.webhook_base_url else None
@@ -418,16 +510,19 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
             reply_markup=back_to_menu_kb(),
         )
         return
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    text = f"💳 Пополнение баланса на {amount_rub} ₽\n\nОплатите по ссылке (СБП / карта):"
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Перейти к оплате СБП", url=pay_url)],
-        [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
-    ])
-    await callback.message.edit_text(text, reply_markup=kb)
+    text = (
+        f"⚡️ Пополнение баланса на: {amount_usd:.2f}$ ({amount_rub} ₽)\n"
+        "❗️ Комиссия кассы составляет 4%\n"
+        f"ID счёта: <code>{order_id}</code>\n\n"
+        "💳 Для оплаты нажмите «💷 Оплатить счёт» и следуйте дальнейшим инструкциям\n\n"
+        "Счёт для оплаты действителен 60 минут!"
+    )
+    await callback.message.edit_text(text, reply_markup=sbp_pay_button_kb(pay_url), parse_mode="HTML")
 
 
 # Отмена / назад
+@router.callback_query(BuyStates.choosing_recipient, F.data == "menu:main")
+@router.callback_query(BuyStates.entering_recipient_username, F.data == "menu:main")
 @router.callback_query(BuyStates.entering_amount, F.data == "menu:main")
 @router.callback_query(BuyStates.choosing_payment, F.data == "menu:main")
 async def buy_back_to_menu(callback: CallbackQuery, state: FSMContext):

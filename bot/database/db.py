@@ -12,9 +12,12 @@ from sqlalchemy.pool import NullPool
 
 from .models import Base
 
-# SQL для добавления колонки balance_usd в существующие таблицы (миграция)
+# SQL для добавления колонок в существующие таблицы (миграции)
 _ADD_BALANCE_USD_SQL = (
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_usd DOUBLE PRECISION DEFAULT 0.0"
+)
+_ADD_RECIPIENT_USERNAME_SQL = (
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS recipient_username VARCHAR(255)"
 )
 
 
@@ -57,6 +60,7 @@ async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
                 await conn.execute(text(_ADD_BALANCE_USD_SQL))
+                await conn.execute(text(_ADD_RECIPIENT_USERNAME_SQL))
             break
         except Exception as e:
             last_error = e
