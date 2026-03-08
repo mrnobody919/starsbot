@@ -69,7 +69,17 @@ class PriceEngine:
             logger.info("Курс TON/USD обновлён: %s", rate)
 
     async def get_ton_usd(self) -> Optional[float]:
-        """Возвращает текущий курс TON/USD (из кэша или один раз запросить)."""
+        """
+        Возвращает курс TON/USD (сколько USD стоит 1 TON).
+        Сумма в TON = сумма_usd / get_ton_usd().
+        Приоритет: 1) TON_USD_RATE, 2) TON_PER_STAR (выводим курс из Stars), 3) CoinGecko.
+        """
+        ton_usd_rate = getattr(self.config, "ton_usd_rate", None)
+        if ton_usd_rate and ton_usd_rate > 0:
+            return ton_usd_rate
+        ton_per_star = getattr(self.config, "ton_per_star", None)
+        if ton_per_star and ton_per_star > 0:
+            return self.config.usd_per_star / ton_per_star
         async with self._lock:
             if self._ton_usd is not None:
                 return self._ton_usd
@@ -88,7 +98,8 @@ class PriceEngine:
 
     async def quote(self, stars: int) -> PriceQuote:
         """
-        Возвращает цену за указанное количество Stars в USD и TON (если доступен курс).
+        Возвращает цену за указанное количество Stars в USD и TON.
+        Курс TON берётся из get_ton_usd() (при TON_PER_STAR — из него, иначе CoinGecko).
         """
         amount_usd = self.stars_to_usd(stars)
         amount_ton: Optional[float] = None
