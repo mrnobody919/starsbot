@@ -1,0 +1,2 @@
+# Копия bot/requirements.txt для деплоя (Railway и др. ищут requirements.txt в корне)
+-r bot/requirements.txt
