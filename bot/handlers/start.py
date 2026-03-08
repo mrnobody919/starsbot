@@ -46,7 +46,7 @@ async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
     if created:
         logger.info("New user: %s (%s)", user.id, user.username)
 
-    bot_username = config.bot.bot_username or (message.bot.username or "your_bot")
+    bot_username = config.bot.bot_username or "your_bot"
     welcome = (
         "👋 Добро пожаловать!\n\n"
         "Здесь вы можете купить Telegram Stars.\n\n"

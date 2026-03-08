@@ -30,7 +30,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
         await safe_callback_answer(callback, "Ошибка: пользователь не найден.", show_alert=True)
         return
 
-    bot_username = callback.bot.username or config.bot.bot_username or "your_bot"
+    bot_username = config.bot.bot_username or "your_bot"
     ref_link = f"https://t.me/{bot_username}?start=ref_{user.referral_code}"
 
     # Успешные заказы и куплено звезд
