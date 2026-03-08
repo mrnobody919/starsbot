@@ -2,8 +2,11 @@
 Инициализация БД: создание engine, сессий, миграции таблиц.
 Используется async SQLAlchemy + asyncpg.
 """
+import asyncio
+import os
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -36,11 +39,27 @@ def create_engine(database_url: str):
 async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
     """
     Создаёт таблицы и возвращает фабрику сессий.
-    Вызывать при старте приложения.
+    При старте на Railway повторяет попытки подключения (DNS/сеть могут быть не готовы).
     """
+    max_attempts = int(os.getenv("DB_CONNECT_ATTEMPTS", "5"))
+    delay_sec = float(os.getenv("DB_CONNECT_DELAY", "5"))
+    last_error = None
     engine = create_engine(database_url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1:
+            await asyncio.sleep(delay_sec)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                # Добавить колонку balance_usd, если таблица users уже была без неё (миграция)
+                await conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_usd DOUBLE PRECISION DEFAULT 0.0"
+                ))
+            break
+        except Exception as e:
+            last_error = e
+            if attempt >= max_attempts:
+                raise last_error
     session_factory = async_sessionmaker(
         engine,
         class_=AsyncSession,
