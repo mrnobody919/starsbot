@@ -97,7 +97,7 @@ class PriceConfig:
     """Настройки ценового движка."""
     stars_per_usd: float = 100.0  # сколько Stars за 1 USD
     ton_usd_url: str = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
-    update_interval_seconds: int = 300  # 5 минут
+    update_interval_seconds: int = 600  # 10 минут (CoinGecko бесплатно лимитирует запросы)
     # Скидки: (мин. сумма заказа в Stars, множитель цены 0.0-1.0)
     discount_tiers: tuple = ((1000, 0.98), (5000, 0.95), (10000, 0.92))
 
@@ -105,7 +105,7 @@ class PriceConfig:
     def from_env(cls) -> "PriceConfig":
         return cls(
             stars_per_usd=float(os.getenv("STARS_PER_USD", "100")),
-            update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "300"))
+            update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
         )
 
 

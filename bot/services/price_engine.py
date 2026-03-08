@@ -43,10 +43,13 @@ class PriceEngine:
         return mult
 
     async def fetch_ton_usd(self) -> Optional[float]:
-        """Загружает курс TON/USD с CoinGecko."""
+        """Загружает курс TON/USD с CoinGecko. При 429 (rate limit) возвращает None."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(self.config.ton_usd_url)
+                if r.status_code == 429:
+                    logger.warning("CoinGecko rate limit (429). Используется кэш или следующий запрос позже.")
+                    return None
                 r.raise_for_status()
                 data = r.json()
                 # CoinGecko: ids=the-open-network
@@ -58,7 +61,7 @@ class PriceEngine:
         return None
 
     async def update_ton_rate(self) -> None:
-        """Обновляет курс TON (вызывается периодически)."""
+        """Обновляет курс TON (вызывается периодически). При 429 курс не меняется (остаётся кэш)."""
         rate = await self.fetch_ton_usd()
         if rate is not None:
             async with self._lock:

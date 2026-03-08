@@ -9,6 +9,7 @@ from sqlalchemy import select
 from bot.database.models import User
 from bot.keyboards import back_to_menu_kb
 from bot.config import AppConfig
+from bot.utils.helpers import safe_callback_answer
 from bot.utils.logger import get_logger
 
 router = Router(name="referrals")
@@ -23,7 +24,7 @@ async def show_referrals(callback: CallbackQuery, session: AsyncSession, config:
     )
     user = result.scalar_one_or_none()
     if not user:
-        await callback.answer("Ошибка.", show_alert=True)
+        await safe_callback_answer(callback, "Ошибка.", show_alert=True)
         return
 
     bot_username = callback.bot.username or config.bot.bot_username or "your_bot"
@@ -39,4 +40,4 @@ async def show_referrals(callback: CallbackQuery, session: AsyncSession, config:
         f"💰 Получено бонусов: {user.referral_reward_total:.0f} ⭐"
     )
     await callback.message.edit_text(text, reply_markup=back_to_menu_kb(), parse_mode="HTML")
-    await callback.answer()
+    await safe_callback_answer(callback)

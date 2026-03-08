@@ -6,6 +6,8 @@ import secrets
 from datetime import datetime
 from typing import Optional
 
+from aiogram.exceptions import TelegramBadRequest
+
 
 def generate_referral_code(telegram_id: int) -> str:
     """Генерирует уникальный реферальный код на основе telegram_id и случайности."""
@@ -47,3 +49,11 @@ def validate_stars_input(text: str, min_stars: int, max_stars: int) -> tuple[boo
     if value > max_stars:
         return False, None, f"Максимум {max_stars} Stars"
     return True, value, ""
+
+
+async def safe_callback_answer(callback, text: Optional[str] = None, show_alert: bool = False) -> None:
+    """Вызывает callback.answer(), игнорируя ошибку «query is too old» (таймаут Telegram)."""
+    try:
+        await callback.answer(text=text or None, show_alert=show_alert)
+    except TelegramBadRequest:
+        pass  # query is too old / response timeout — ожидаемо при долгих операциях

@@ -1,6 +1,7 @@
 """
 Интеграция FreeKassa: создание платежа, проверка подписи webhook.
 """
+import asyncio
 import hashlib
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -59,21 +60,29 @@ class FreeKassaService:
         if notification_url:
             payload["notification_url"] = notification_url
 
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                r = await client.post(FREEKASSA_CREATE_URL, json=payload)
-                if r.status_code != 200:
-                    logger.warning("FreeKassa create order: %s %s", r.status_code, r.text)
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    r = await client.post(FREEKASSA_CREATE_URL, json=payload)
+                    if r.status_code != 200:
+                        logger.warning("FreeKassa create order: %s %s", r.status_code, r.text)
+                        return None
+                    data = r.json()
+                    url = data.get("url") or data.get("payment_url")
+                    if url:
+                        return url
+                    logger.warning("FreeKassa no URL in response: %s", data)
                     return None
-                data = r.json()
-                url = data.get("url") or data.get("payment_url")
-                if url:
-                    return url
-                logger.warning("FreeKassa no URL in response: %s", data)
+            except (httpx.ConnectTimeout, httpx.ConnectError) as e:
+                if attempt == 0:
+                    await asyncio.sleep(2.0)
+                    continue
+                logger.exception("FreeKassa create_order: %s", e)
                 return None
-        except Exception as e:
-            logger.exception("FreeKassa create_order: %s", e)
-            return None
+            except Exception as e:
+                logger.exception("FreeKassa create_order: %s", e)
+                return None
+        return None
 
     def verify_notification(self, payload: dict) -> bool:
         """

@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery
 from bot.database.models import User, Order
 from bot.keyboards import profile_kb, orders_list_kb, order_detail_kb
 from bot.config import AppConfig
-from bot.utils.helpers import format_stars, format_datetime
+from bot.utils.helpers import format_stars, format_datetime, safe_callback_answer
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,7 +27,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
     """Показывает профиль: ID, реферальная ссылка, кол-во рефералов, бонусы, заказы."""
     user = await _get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
-        await callback.answer("Ошибка: пользователь не найден.", show_alert=True)
+        await safe_callback_answer(callback, "Ошибка: пользователь не найден.", show_alert=True)
         return
 
     bot_username = callback.bot.username or config.bot.bot_username or "your_bot"
@@ -57,7 +57,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
         f"⭐ Куплено звезд: {format_stars(total_stars)}\n"
     )
     await callback.message.edit_text(text, reply_markup=profile_kb(), parse_mode="HTML")
-    await callback.answer()
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data == "menu:orders")
@@ -77,7 +77,7 @@ async def show_orders_list(callback: CallbackQuery, session: AsyncSession):
             "📋 У вас пока нет заказов.",
             reply_markup=orders_list_kb([], 0, 5)
         )
-        await callback.answer()
+        await safe_callback_answer(callback)
         return
 
     page = 0
@@ -85,7 +85,7 @@ async def show_orders_list(callback: CallbackQuery, session: AsyncSession):
         "📋 Ваши заказы:",
         reply_markup=orders_list_kb(orders, page, 5)
     )
-    await callback.answer()
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("orders:page:"))
@@ -97,14 +97,14 @@ async def orders_page(callback: CallbackQuery, session: AsyncSession):
         page = 0
     user = await _get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
-        await callback.answer()
+        await safe_callback_answer(callback)
         return
     result = await session.execute(
         select(Order).where(Order.user_id == user.id).order_by(Order.created_at.desc())
     )
     orders = list(result.scalars().all())
     await callback.message.edit_reply_markup(reply_markup=orders_list_kb(orders, page, 5))
-    await callback.answer()
+    await safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("order:view:"))
@@ -113,15 +113,15 @@ async def order_view(callback: CallbackQuery, session: AsyncSession):
     try:
         order_id = int(callback.data.split(":")[-1])
     except ValueError:
-        await callback.answer()
+        await safe_callback_answer(callback)
         return
     user = await _get_user_by_telegram_id(session, callback.from_user.id)
     if not user:
-        await callback.answer("Ошибка.", show_alert=True)
+        await safe_callback_answer(callback, "Ошибка.", show_alert=True)
         return
     order = await session.get(Order, order_id)
     if not order or order.user_id != user.id:
-        await callback.answer("Заказ не найден.", show_alert=True)
+        await safe_callback_answer(callback, "Заказ не найден.", show_alert=True)
         return
 
     status_emoji = "✅" if order.delivery_status == "completed" else "⏳"
@@ -135,4 +135,4 @@ async def order_view(callback: CallbackQuery, session: AsyncSession):
         f"📅 {format_datetime(order.created_at)}\n"
     )
     await callback.message.edit_text(text, reply_markup=order_detail_kb(order_id))
-    await callback.answer()
+    await safe_callback_answer(callback)

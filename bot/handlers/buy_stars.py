@@ -391,10 +391,11 @@ async def topup_usdt_ton(callback: CallbackQuery, state: FSMContext, config: App
 
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:sbp")
 async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Пополнение через СБП (FreeKassa)."""
+    """Пополнение через СБП (FreeKassa). Сразу отвечаем на callback, чтобы не истёк таймаут."""
     if not config.freekassa.enabled:
         await callback.answer("СБП (FreeKassa) временно недоступен.", show_alert=True)
         return
+    await callback.answer("Создаём ссылку на оплату...")
     data = await state.get_data()
     amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0
     amount_rub = round(amount_usd * 100)
@@ -412,7 +413,10 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         notification_url=notification_url,
     )
     if not pay_url:
-        await callback.answer("Ошибка создания платежа СБП.", show_alert=True)
+        await callback.message.edit_text(
+            "❌ Не удалось создать платёж СБП. Попробуйте позже или выберите другой способ.",
+            reply_markup=back_to_menu_kb(),
+        )
         return
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     text = f"💳 Пополнение баланса на {amount_rub} ₽\n\nОплатите по ссылке (СБП / карта):"
@@ -421,7 +425,6 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
     ])
     await callback.message.edit_text(text, reply_markup=kb)
-    await callback.answer()
 
 
 # Отмена / назад
