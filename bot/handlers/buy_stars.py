@@ -184,7 +184,7 @@ async def process_amount(
             "💎 Cryptobot — оплата через Cryptobot\n"
             "🔸 Другая криптовалюта — оплата в любой криптовалюте"
         )
-        await message.answer(text, reply_markup=topup_methods_kb(config.freekassa.enabled))
+        await message.answer(text, reply_markup=topup_methods_kb())
         return
 
     await state.set_state(BuyStates.choosing_payment)
@@ -198,7 +198,7 @@ async def process_amount(
 
     await message.answer(
         text,
-        reply_markup=payment_method_kb(freekassa_enabled=config.freekassa.enabled),
+        reply_markup=payment_method_kb(),
         parse_mode="HTML",
     )
 
@@ -305,10 +305,6 @@ async def confirm_and_pay(
     price_usd = order.price
 
     if method == "freekassa":
-        if not config.freekassa.enabled:
-            await callback.answer("Оплата FreeKassa временно недоступна.", show_alert=True)
-            await callback.message.edit_text("Выберите другой способ оплаты.", reply_markup=payment_method_kb(freekassa_enabled=False))
-            return
         fk = FreeKassaService(config.freekassa)
         notification_url = None
         if config.webhook_base_url:
@@ -484,9 +480,6 @@ async def topup_usdt_ton(callback: CallbackQuery, state: FSMContext, config: App
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:sbp")
 async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
     """Пополнение через СБП (FreeKassa). Комиссия 4%."""
-    if not config.freekassa.enabled:
-        await callback.answer("СБП (FreeKassa) временно недоступен.", show_alert=True)
-        return
     await callback.answer("Создаём ссылку на оплату...")
     data = await state.get_data()
     amount_usd = data.get("shortage_usd") or data.get("quote_usd") or 1.0

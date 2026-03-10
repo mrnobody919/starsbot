@@ -25,7 +25,6 @@
 | `FREEKASSA_MERCHANT_ID` | ID магазина из кабинета FreeKassa |
 | `FREEKASSA_SECRET_WORD_1` | Секретное слово 1 |
 | `FREEKASSA_SECRET_WORD_2` | Секретное слово 2 |
-| `FREEKASSA_ENABLED` | Поставьте **0** или **false**, пока FreeKassa ещё не активирован — кнопка и СБП не показываются. После активации уберите переменную или поставьте **1**. |
 | `WEBHOOK_BASE_URL` | `https://web-production-59ae8.up.railway.app` (ваш домен Railway) |
 
 Без этих переменных бот запустится, но кнопка «FreeKassa» не будет показана.

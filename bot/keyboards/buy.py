@@ -22,16 +22,14 @@ def back_to_recipient_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def payment_method_kb(freekassa_enabled: bool = True) -> InlineKeyboardMarkup:
-    """Выбор способа оплаты: CryptoBot, TON, опционально FreeKassa."""
-    buttons = [
+def payment_method_kb() -> InlineKeyboardMarkup:
+    """Выбор способа оплаты: CryptoBot, TON, СБП (FreeKassa)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⭐ CryptoBot (Stars)", callback_data="pay:cryptobot")],
         [InlineKeyboardButton(text="💎 Toncoin", callback_data="pay:ton")],
-    ]
-    if freekassa_enabled:
-        buttons.append([InlineKeyboardButton(text="💳 FreeKassa", callback_data="pay:freekassa")])
-    buttons.append([InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+        [InlineKeyboardButton(text="💳 СБП (рубли)", callback_data="pay:freekassa")],
+        [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
+    ])
 
 
 def confirm_order_kb(order_id: int) -> InlineKeyboardMarkup:
@@ -42,17 +40,14 @@ def confirm_order_kb(order_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def topup_methods_kb(freekassa_enabled: bool = True) -> InlineKeyboardMarkup:
+def topup_methods_kb() -> InlineKeyboardMarkup:
     """Кнопки выбора способа пополнения: СБП 4%, TON без комиссии, Cryptobot 3%."""
-    buttons = []
-    if freekassa_enabled:
-        buttons.append([InlineKeyboardButton(text="💳 СБП Рубли | 4%", callback_data="topup:sbp")])
-    buttons += [
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 СБП Рубли | 4%", callback_data="topup:sbp")],
         [InlineKeyboardButton(text="🔹 TON | Без комиссии", callback_data="topup:ton")],
         [InlineKeyboardButton(text="💎 Cryptobot | 3%", callback_data="topup:cryptobot")],
         [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    ])
 
 
 def cryptobot_pay_button_kb(pay_url: str) -> InlineKeyboardMarkup:
