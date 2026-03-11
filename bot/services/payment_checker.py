@@ -3,6 +3,7 @@
 Связывает платёжные системы с заказами в БД и уведомляет пользователя/админа.
 """
 import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import select
@@ -151,7 +152,9 @@ class PaymentChecker:
                         if self.ton.enabled and price_engine:
                             ton_usd = await price_engine.get_ton_usd()
                             if ton_usd and ton_usd > 0:
-                                incoming = await self.ton.get_recent_incoming_transfers(limit=20)
+                                incoming = await self.ton.get_recent_incoming_transfers(limit=30)
+                                if incoming:
+                                    logger.debug("TON incoming transfers: %s", [(t.get("amount_ton"), t.get("comment")) for t in incoming])
                                 pending_ton = await session.execute(
                                     select(Order).where(
                                         Order.payment_status == "pending",
@@ -159,19 +162,22 @@ class PaymentChecker:
                                         Order.external_payment_id.isnot(None),
                                     )
                                 )
-                                for order in pending_ton.scalars():
+                                orders_list = list(pending_ton.scalars())
+                                for order in orders_list:
                                     if not (order.external_payment_id or "").startswith("ton_"):
                                         continue
-                                    expected_comment = f"order_{order.id}"
                                     amount_to_match = order.price - (getattr(order, "balance_used", 0) or 0)
                                     if amount_to_match <= 0:
                                         amount_to_match = order.price
                                     expected_ton = amount_to_match / ton_usd
+                                    expected_comment = f"order_{order.id}"
+                                    matched = False
                                     for tr in incoming:
-                                        if tr.get("comment", "").strip() != expected_comment:
-                                            continue
                                         amount_ton = tr.get("amount_ton") or 0
-                                        if abs(amount_ton - expected_ton) / max(expected_ton, 1e-9) <= 0.02:
+                                        comment = (tr.get("comment") or "").strip()
+                                        amount_ok = abs(amount_ton - expected_ton) / max(expected_ton, 1e-9) <= 0.05
+                                        comment_ok = comment == expected_comment or expected_comment in comment
+                                        if comment_ok and amount_ok:
                                             user = await session.get(User, order.user_id)
                                             if user:
                                                 rub = getattr(config, "rub_per_usd", 100) or 100
@@ -180,8 +186,34 @@ class PaymentChecker:
                                                 )
                                             await complete_order_payment(session, bot, config, order)
                                             await session.commit()
-                                            logger.info("PaymentChecker: order %s paid via TON", order.id)
+                                            logger.info("PaymentChecker: order %s paid via TON (comment match)", order.id)
+                                            matched = True
                                             break
+                                    if matched:
+                                        break
+                                    # Резерв: комментарий не пришёл — сопоставление по сумме для заказа не старше 2 ч
+                                    created = getattr(order, "created_at", None)
+                                    if created:
+                                        created_utc = created if getattr(created, "tzinfo", None) else created.replace(tzinfo=timezone.utc)
+                                        if datetime.now(timezone.utc) - created_utc <= timedelta(hours=2):
+                                            for tr in incoming:
+                                                if (tr.get("comment") or "").strip():
+                                                    continue
+                                                amount_ton = tr.get("amount_ton") or 0
+                                                if abs(amount_ton - expected_ton) / max(expected_ton, 1e-9) <= 0.05:
+                                                    user = await session.get(User, order.user_id)
+                                                    if user:
+                                                        rub = getattr(config, "rub_per_usd", 100) or 100
+                                                        await send_payment_received_message(
+                                                            bot, user.telegram_id, order.price, order.price * rub
+                                                        )
+                                                    await complete_order_payment(session, bot, config, order)
+                                                    await session.commit()
+                                                    logger.info("PaymentChecker: order %s paid via TON (amount match)", order.id)
+                                                    matched = True
+                                                    break
+                                    if matched:
+                                        break
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
