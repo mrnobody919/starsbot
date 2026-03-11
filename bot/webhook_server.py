@@ -53,7 +53,10 @@ def create_webhook_app(bot, session_factory, config):
                         order_id = int(order_id_str)
                     except ValueError:
                         return web.Response(status=400, text="Bad order id")
-                    ok = await handle_freekassa_paid(session, bot, config, order_id)
+                    amount_rub = float(payload.get("AMOUNT") or 0)
+                    ok = await handle_freekassa_paid(
+                        session, bot, config, order_id, amount_rub=amount_rub
+                    )
                 await session.commit()
             except Exception as e:
                 await session.rollback()

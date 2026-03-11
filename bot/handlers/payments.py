@@ -27,6 +27,19 @@ async def _notify_user_order_paid(bot: Bot, telegram_id: int, order_id: int, sta
         logger.warning("Notify user %s failed: %s", telegram_id, e)
 
 
+async def send_payment_received_message(
+    bot: Bot, telegram_id: int, amount_usd: float, amount_rub: float
+) -> None:
+    """Сообщение о получении оплаты (для сценария «оплата заказа», без зачисления на баланс)."""
+    try:
+        await bot.send_message(
+            telegram_id,
+            f"✅ На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.0f} ₽). Спасибо за пополнение!",
+        )
+    except Exception as e:
+        logger.warning("Send payment received to %s failed: %s", telegram_id, e)
+
+
 async def _notify_user_order_completed(bot: Bot, telegram_id: int, order_id: int, stars: int):
     """Уведомление пользователю: заказ выполнен, Stars отправлены."""
     try:
@@ -212,14 +225,19 @@ async def handle_freekassa_paid(
     bot: Bot,
     config: AppConfig,
     order_id: int,
+    amount_rub: float | None = None,
 ) -> bool:
     """
     Вызывается после верификации webhook FreeKassa: помечаем заказ оплаченным,
     начисляем рефералу бонус, уведомляем пользователя и админов.
+    Если передан amount_rub, сначала отправляем сообщение «На ваш баланс зачислено...».
     """
     order = await session.get(Order, order_id)
     if not order or order.payment_status == "paid":
         return False
+    user = await session.get(User, order.user_id)
+    if user and amount_rub is not None and amount_rub > 0:
+        await send_payment_received_message(bot, user.telegram_id, order.price, amount_rub)
     await complete_order_payment(session, bot, config, order)
     logger.info("Order %s paid (FreeKassa)", order_id)
     return True

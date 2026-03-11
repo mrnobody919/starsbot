@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Order, Transaction, User, Referral
+from bot.database.models import Order, Transaction, User
 from bot.services.cryptobot_service import CryptoBotService
 from bot.services.ton_service import TonService
 from bot.utils.logger import get_logger
@@ -110,7 +110,7 @@ class PaymentChecker:
         Запускает фоновый опрос ожидающих заказов (CryptoBot, TON).
         После обнаружения оплаты помечает заказ оплаченным и уведомляет пользователя.
         """
-        from bot.handlers.payments import complete_order_payment
+        from bot.handlers.payments import complete_order_payment, send_payment_received_message
 
         async def _poll():
             while True:
@@ -136,6 +136,12 @@ class PaymentChecker:
                                 continue
                             if (inv.get("status") or "").lower() != "paid":
                                 continue
+                            user = await session.get(User, order.user_id)
+                            if user:
+                                rub = getattr(config, "rub_per_usd", 100) or 100
+                                await send_payment_received_message(
+                                    bot, user.telegram_id, order.price, order.price * rub
+                                )
                             await complete_order_payment(session, bot, config, order)
                             await session.commit()
                             logger.info("PaymentChecker: order %s paid via CryptoBot", order.id)
@@ -163,6 +169,12 @@ class PaymentChecker:
                                             continue
                                         amount_ton = tr.get("amount_ton") or 0
                                         if abs(amount_ton - expected_ton) / max(expected_ton, 1e-9) <= 0.02:
+                                            user = await session.get(User, order.user_id)
+                                            if user:
+                                                rub = getattr(config, "rub_per_usd", 100) or 100
+                                                await send_payment_received_message(
+                                                    bot, user.telegram_id, order.price, order.price * rub
+                                                )
                                             await complete_order_payment(session, bot, config, order)
                                             await session.commit()
                                             logger.info("PaymentChecker: order %s paid via TON", order.id)
