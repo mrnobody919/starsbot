@@ -1,8 +1,10 @@
 """
 Обработчик /start и главного меню (инлайн-кнопки).
 """
+from pathlib import Path
+
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from aiogram.filters import CommandStart, Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,13 @@ from bot.utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = Router(name="start")
+
+
+def _get_menu_banner_path() -> Path | None:
+    """Путь к баннеру над меню (bot/static/menu_banner.png). Если файла нет — None."""
+    base = Path(__file__).resolve().parent.parent
+    path = base / "static" / "menu_banner.png"
+    return path if path.is_file() else None
 
 
 def _parse_start_ref(text: str | None) -> str | None:
@@ -52,17 +61,42 @@ async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
         "С помощью нашего сервиса вы сможете мгновенно купить или продать Telegram Stars, "
         "а также оформить Telegram Premium за рубли или криптовалюту."
     )
-    await message.answer(welcome, reply_markup=main_menu_kb(is_admin=is_admin))
+    banner_path = _get_menu_banner_path()
+    if banner_path:
+        await message.answer_photo(
+            photo=FSInputFile(banner_path),
+            caption=welcome,
+            reply_markup=main_menu_kb(is_admin=is_admin),
+        )
+    else:
+        await message.answer(welcome, reply_markup=main_menu_kb(is_admin=is_admin))
 
 
 @router.callback_query(F.data == "menu:main")
 async def menu_main(callback: CallbackQuery, session: AsyncSession, config: AppConfig):
-    """Возврат в главное меню по кнопке «В меню». Админам показывается кнопка «Админ панель»."""
+    """Возврат в главное меню по кнопке «В меню». Если есть баннер — показываем его над меню."""
     is_admin = callback.from_user.id in config.admin_ids
-    await callback.message.edit_text(
-        "Выберите действие:",
-        reply_markup=main_menu_kb(is_admin=is_admin)
-    )
+    caption = "Выберите действие:"
+    banner_path = _get_menu_banner_path()
+    try:
+        if banner_path:
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=FSInputFile(banner_path),
+                caption=caption,
+                reply_markup=main_menu_kb(is_admin=is_admin),
+            )
+        else:
+            await callback.message.edit_text(
+                caption,
+                reply_markup=main_menu_kb(is_admin=is_admin),
+            )
+    except Exception as e:
+        logger.warning("menu_main: %s", e)
+        await callback.message.edit_text(
+            caption,
+            reply_markup=main_menu_kb(is_admin=is_admin),
+        )
     await callback.answer()
 
 

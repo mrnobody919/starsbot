@@ -689,9 +689,25 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
 @router.callback_query(BuyStates.entering_amount, F.data == "menu:main")
 @router.callback_query(BuyStates.choosing_payment, F.data == "menu:main")
 async def buy_back_to_menu(callback: CallbackQuery, state: FSMContext, config: AppConfig):
-    """Возврат в меню из сценария покупки. Админам показывается кнопка «Админ панель»."""
+    """Возврат в меню из сценария покупки. Если есть баннер — показываем его над меню."""
     await state.clear()
     from bot.keyboards import main_menu_kb
+    from bot.handlers.start import _get_menu_banner_path
+    from aiogram.types import FSInputFile
     is_admin = callback.from_user.id in config.admin_ids
-    await callback.message.edit_text("Выберите действие:", reply_markup=main_menu_kb(is_admin=is_admin))
+    caption = "Выберите действие:"
+    banner_path = _get_menu_banner_path()
+    try:
+        if banner_path:
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=FSInputFile(banner_path),
+                caption=caption,
+                reply_markup=main_menu_kb(is_admin=is_admin),
+            )
+        else:
+            await callback.message.edit_text(caption, reply_markup=main_menu_kb(is_admin=is_admin))
+    except Exception as e:
+        logger.warning("buy_back_to_menu: %s", e)
+        await callback.message.edit_text(caption, reply_markup=main_menu_kb(is_admin=is_admin))
     await callback.answer()
