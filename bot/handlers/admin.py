@@ -69,7 +69,8 @@ async def admin_main(callback: CallbackQuery, state: FSMContext, config: AppConf
         await callback.answer("Доступ запрещён.", show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text("🔐 Админ-панель", reply_markup=admin_main_kb())
+    from bot.utils.helpers import edit_or_send_text
+    await edit_or_send_text(callback, "🔐 Админ-панель", admin_main_kb())
     await callback.answer()
 
 

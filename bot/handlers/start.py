@@ -12,6 +12,7 @@ from bot.database import get_or_create_user
 from bot.keyboards import main_menu_kb, back_to_menu_kb
 from bot.config import AppConfig
 from bot.utils.logger import get_logger
+from bot.utils.helpers import edit_or_send_text
 
 logger = get_logger(__name__)
 
@@ -104,8 +105,10 @@ async def menu_main(callback: CallbackQuery, session: AsyncSession, config: AppC
 async def menu_support(callback: CallbackQuery, config: AppConfig):
     """Поддержка: ссылка или текст."""
     link = config.support_link or "https://t.me/"
-    await callback.message.edit_text(
+    await edit_or_send_text(
+        callback,
         f"💬 Поддержка: {link}",
-        reply_markup=back_to_menu_kb()
+        back_to_menu_kb(),
+        parse_mode=None,
     )
     await callback.answer()

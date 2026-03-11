@@ -57,3 +57,21 @@ async def safe_callback_answer(callback, text: Optional[str] = None, show_alert:
         await callback.answer(text=text or None, show_alert=show_alert)
     except TelegramBadRequest:
         pass  # query is too old / response timeout — ожидаемо при долгих операциях
+
+
+async def edit_or_send_text(callback, text: str, reply_markup, parse_mode: Optional[str] = "HTML") -> None:
+    """
+    Редактирует сообщение или удаляет и отправляет новое, если текущее — с фото (баннер меню).
+    У сообщений с фото в Telegram нет «текста», только caption — edit_text падает с «no text to edit».
+    """
+    kwargs = {"reply_markup": reply_markup}
+    if parse_mode is not None:
+        kwargs["parse_mode"] = parse_mode
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(text, **kwargs)
+        else:
+            await callback.message.edit_text(text, **kwargs)
+    except TelegramBadRequest:
+        await callback.message.answer(text, **kwargs)

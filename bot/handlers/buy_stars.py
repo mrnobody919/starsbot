@@ -27,7 +27,7 @@ from bot.services.antifraud import AntifraudService
 from bot.services.freekassa_service import FreeKassaService
 from bot.services.ton_service import TonService
 from bot.services.cryptobot_service import CryptoBotService
-from bot.utils.helpers import format_stars, format_price, validate_stars_input
+from bot.utils.helpers import format_stars, format_price, validate_stars_input, edit_or_send_text
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -57,11 +57,11 @@ async def start_buy(callback: CallbackQuery, state: FSMContext):
     """Начало покупки: выбор получателя (себе / другу)."""
     await state.clear()
     await state.set_state(BuyStates.choosing_recipient)
-    await callback.message.edit_text(
+    await edit_or_send_text(
+        callback,
         "✨ <b>Выбор имени пользователя</b>\n\n"
         "Выберите, кому вы хотите купить Telegram Stars",
-        reply_markup=recipient_choice_kb(),
-        parse_mode="HTML",
+        recipient_choice_kb(),
     )
     await callback.answer()
 

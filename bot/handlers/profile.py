@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery
 from bot.database.models import User, Order
 from bot.keyboards import profile_kb, orders_list_kb, order_detail_kb
 from bot.config import AppConfig
-from bot.utils.helpers import format_stars, format_datetime, safe_callback_answer
+from bot.utils.helpers import format_stars, edit_or_send_text, format_datetime, safe_callback_answer
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -59,7 +59,7 @@ async def show_profile(callback: CallbackQuery, session: AsyncSession, config: A
         f"📦 Успешных заказов: {total_orders}\n"
         f"⭐ Куплено звёзд: {format_stars(total_stars)}\n"
     )
-    await callback.message.edit_text(text, reply_markup=profile_kb(), parse_mode="HTML")
+    await edit_or_send_text(callback, text, profile_kb())
     await safe_callback_answer(callback)
 
 
@@ -76,17 +76,19 @@ async def show_orders_list(callback: CallbackQuery, session: AsyncSession):
     )
     orders = list(result.scalars().all())
     if not orders:
-        await callback.message.edit_text(
+        await edit_or_send_text(
+            callback,
             "📋 У вас пока нет заказов.",
-            reply_markup=orders_list_kb([], 0, 5)
+            orders_list_kb([], 0, 5),
         )
         await safe_callback_answer(callback)
         return
 
     page = 0
-    await callback.message.edit_text(
+    await edit_or_send_text(
+        callback,
         "📋 Ваши заказы:",
-        reply_markup=orders_list_kb(orders, page, 5)
+        orders_list_kb(orders, page, 5),
     )
     await safe_callback_answer(callback)
 
