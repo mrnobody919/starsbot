@@ -3,8 +3,7 @@
 Связывает платёжные системы с заказами в БД и уведомляет пользователя/админа.
 """
 import asyncio
-from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +12,9 @@ from bot.database.models import Order, Transaction, User, Referral
 from bot.services.cryptobot_service import CryptoBotService
 from bot.services.ton_service import TonService
 from bot.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from bot.config import AppConfig
 
 logger = get_logger(__name__)
 
@@ -96,17 +98,75 @@ class PaymentChecker:
         )
         return order_id if ok else None
 
-    def start_polling(self, session_factory, interval_seconds: int = 30) -> None:
+    def start_polling(
+        self,
+        session_factory,
+        bot,
+        config: "AppConfig",
+        price_engine=None,
+        interval_seconds: int = 45,
+    ) -> None:
         """
-        Запускает фоновый опрос ожидающих заказов (CryptoBot/TON).
-        session_factory — async_sessionmaker для создания сессий.
+        Запускает фоновый опрос ожидающих заказов (CryptoBot, TON).
+        После обнаружения оплаты помечает заказ оплаченным и уведомляет пользователя.
         """
+        from bot.handlers.payments import complete_order_payment
+
         async def _poll():
             while True:
                 try:
                     async with session_factory() as session:
-                        # Ожидающие заказы по CryptoBot/TON можно проверять по external_payment_id
-                        await session.commit()
+                        # CryptoBot: заказы с сохранённым invoice_id
+                        pending_crypto = await session.execute(
+                            select(Order).where(
+                                Order.payment_status == "pending",
+                                Order.payment_method == "cryptobot",
+                                Order.external_payment_id.isnot(None),
+                                Order.external_payment_id != "",
+                            )
+                        )
+                        for row in pending_crypto.scalars():
+                            order = row
+                            try:
+                                inv_id = int(order.external_payment_id)
+                            except (ValueError, TypeError):
+                                continue
+                            inv = await self.cryptobot.get_invoice(inv_id)
+                            if not inv:
+                                continue
+                            if (inv.get("status") or "").lower() != "paid":
+                                continue
+                            await complete_order_payment(session, bot, config, order)
+                            await session.commit()
+                            logger.info("PaymentChecker: order %s paid via CryptoBot", order.id)
+                            break  # по одному за раз, следующий цикл подхватит остальные
+
+                        # TON: заказы с external_payment_id вида "ton_123"
+                        if self.ton.enabled and price_engine:
+                            ton_usd = await price_engine.get_ton_usd()
+                            if ton_usd and ton_usd > 0:
+                                incoming = await self.ton.get_recent_incoming_transfers(limit=20)
+                                pending_ton = await session.execute(
+                                    select(Order).where(
+                                        Order.payment_status == "pending",
+                                        Order.payment_method == "ton",
+                                        Order.external_payment_id.isnot(None),
+                                    )
+                                )
+                                for order in pending_ton.scalars():
+                                    if not (order.external_payment_id or "").startswith("ton_"):
+                                        continue
+                                    expected_comment = f"order_{order.id}"
+                                    expected_ton = order.price / ton_usd
+                                    for tr in incoming:
+                                        if tr.get("comment", "").strip() != expected_comment:
+                                            continue
+                                        amount_ton = tr.get("amount_ton") or 0
+                                        if abs(amount_ton - expected_ton) / max(expected_ton, 1e-9) <= 0.02:
+                                            await complete_order_payment(session, bot, config, order)
+                                            await session.commit()
+                                            logger.info("PaymentChecker: order %s paid via TON", order.id)
+                                            break
                 except asyncio.CancelledError:
                     break
                 except Exception as e:

@@ -360,19 +360,24 @@ async def confirm_and_pay(
                 user_id=callback.from_user.id,
             )
             if result:
+                # Сохраняем invoice_id для последующей проверки оплаты через payment_checker
+                invoice_id = result.get("invoice_id")
+                if invoice_id is not None:
+                    order.external_payment_id = str(invoice_id)
+                    await session.flush()
                 # mini_app_invoice_url — ссылка на оплату в Mini App (компактный экран), иначе bot_invoice_url
                 pay_url = (
                     result.get("mini_app_invoice_url")
                     or result.get("bot_invoice_url")
                     or result.get("pay_url")
                 )
-                invoice_id = result.get("invoice_id", "")
+                invoice_id_str = str(invoice_id) if invoice_id is not None else ""
                 if pay_url:
                     amount_usd = order.price
                     text = (
                         f"⚡️ Оплата заказа #{order.id}: {format_stars(stars)} — ${amount_usd:.2f} ( USDT)\n"
                         f"❗️ Комиссия Cryptobot составляет ~3%\n"
-                        f"ID счёта: <code>{invoice_id}</code>\n\n"
+                        f"ID счёта: <code>{invoice_id_str}</code>\n\n"
                         f"💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
                         f"Счёт для оплаты действителен 60 минут!"
                     )

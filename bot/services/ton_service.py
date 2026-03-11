@@ -2,13 +2,16 @@
 Сервис для приёма Toncoin: генерация ссылки на оплату, проверка входящих переводов.
 Для продакшна можно использовать TON Connect или API кошелька.
 """
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import quote
 
+import httpx
 from bot.config import TonConfig
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+TONAPI_EVENTS = "https://tonapi.io/v2/accounts"
 
 
 class TonService:
@@ -47,9 +50,58 @@ class TonService:
         """
         if not self.config.api_key:
             return None
-        # Пример: TonAPI или TON Center — реализация зависит от выбранного провайдера
-        # try:
-        #     async with httpx.AsyncClient() as client:
-        #         r = await client.get(f"https://toncenter.com/api/v2/getTransaction?hash={tx_hash}")
-        #         ...
         return None
+
+    async def get_recent_incoming_transfers(self, limit: int = 30) -> list[dict[str, Any]]:
+        """
+        Возвращает последние входящие переводы на кошелёк (TonAPI).
+        Каждый элемент: {"amount_ton": float, "comment": str}.
+        """
+        if not self.config.wallet_address or not self.config.api_key:
+            return []
+        addr = self.config.wallet_address.strip()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(
+                    f"{TONAPI_EVENTS}/{addr}/events",
+                    params={"limit": limit},
+                    headers={"Authorization": f"Bearer {self.config.api_key}"},
+                )
+                if r.status_code != 200:
+                    logger.warning("TonAPI events: %s %s", r.status_code, r.text[:200])
+                    return []
+                data = r.json()
+        except Exception as e:
+            logger.warning("TonAPI get_recent_incoming: %s", e)
+            return []
+        out: list[dict[str, Any]] = []
+        for ev in data.get("events", [])[:limit]:
+            for act in ev.get("actions", []):
+                if act.get("type") != "TonTransfer":
+                    continue
+                ton_transfer = act.get("ton_transfer") or {}
+                recipient_addr = (ton_transfer.get("recipient") or {}).get("address", "")
+                if not recipient_addr:
+                    continue
+                # Входящий перевод: получатель — наш кошелёк (сравнение с учётом разных форматов)
+                is_incoming = (
+                    addr in recipient_addr or recipient_addr in addr or addr == recipient_addr
+                )
+                if not is_incoming:
+                    continue
+                try:
+                    amount_nano = int(ton_transfer.get("amount", 0))
+                except (TypeError, ValueError):
+                    continue
+                amount_ton = amount_nano / 1_000_000_000
+                comment = ""
+                payload = ton_transfer.get("payload") or ""
+                if isinstance(payload, str) and payload:
+                    try:
+                        import base64
+                        raw = base64.b64decode(payload, validate=True)
+                        comment = raw.decode("utf-8", errors="replace").strip("\x00")
+                    except Exception:
+                        pass
+                out.append({"amount_ton": amount_ton, "comment": comment})
+        return out

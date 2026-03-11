@@ -23,6 +23,9 @@ from bot.database import init_db, ensure_balance_usd_column
 from bot.middlewares import AntifloodMiddleware, DbSessionMiddleware
 from bot.handlers import start, buy_stars, payments, profile, referrals, admin
 from bot.services.price_engine import PriceEngine
+from bot.services.payment_checker import PaymentChecker
+from bot.services.cryptobot_service import CryptoBotService
+from bot.services.ton_service import TonService
 from bot.webhook_server import create_webhook_app
 from bot.utils.logger import setup_logger
 
@@ -58,6 +61,19 @@ async def main():
                 logger.warning("Price loop error: %s", e)
             await asyncio.sleep(config.price.update_interval_seconds)
     price_task = asyncio.create_task(price_loop())
+
+    # Опрос оплат CryptoBot и TON (подтверждение заказа после оплаты)
+    payment_checker = PaymentChecker(
+        cryptobot=CryptoBotService(config.cryptobot),
+        ton=TonService(config.ton),
+    )
+    payment_checker.start_polling(
+        session_factory,
+        bot,
+        config,
+        price_engine=price_engine,
+        interval_seconds=int(os.getenv("PAYMENT_CHECK_INTERVAL", "45")),
+    )
 
     # Middlewares: сессия БД и антифлуд
     dp.message.middleware(DbSessionMiddleware(session_factory))
@@ -97,6 +113,7 @@ async def main():
     finally:
         await runner.cleanup()
         price_task.cancel()
+        payment_checker.stop_polling()
         try:
             await price_task
         except asyncio.CancelledError:
