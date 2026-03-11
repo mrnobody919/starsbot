@@ -43,6 +43,13 @@ def admin_order_actions_kb(order_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def order_stars_sent_kb(order_id: int) -> InlineKeyboardMarkup:
+    """Одна кнопка под сообщением о новом заказе: «Stars отправлены» — помечает заказ выполненным и уведомляет покупателя."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⭐ Stars отправлены", callback_data=f"admin:order:complete:{order_id}")]
+    ])
+
+
 def admin_user_actions_kb(user_id: int, is_blocked: bool) -> InlineKeyboardMarkup:
     """Действия по пользователю: заблокировать/разблокировать."""
     if is_blocked:

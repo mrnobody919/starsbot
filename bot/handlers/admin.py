@@ -150,7 +150,16 @@ async def admin_order_complete(
     if user:
         await _notify_user_order_completed(callback.bot, user.telegram_id, order.id, order.stars_amount)
     await callback.answer("Заказ отмечен выполненным.")
-    await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
+    # Под сообщением «Оплачен заказ» (админ/канал) убираем кнопку; в админ-панели — меняем на действия по заказу
+    text = callback.message.text or callback.message.caption or ""
+    if "🆕" in text and "Оплачен заказ" in text:
+        try:
+            from aiogram.types import InlineKeyboardMarkup
+            await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
+        except Exception:
+            await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
+    else:
+        await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
 
 
 @router.callback_query(F.data.startswith("admin:order:cancel:"))

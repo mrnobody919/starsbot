@@ -52,22 +52,25 @@ async def _notify_user_order_completed(bot: Bot, telegram_id: int, order_id: int
 
 
 async def _notify_admins_new_order(bot: Bot, admin_ids: list[int], order: Order, user: User):
-    """Уведомление админам: новый оплаченный заказ для ручной отправки Stars."""
+    """Уведомление админам: новый оплаченный заказ и кнопка «Stars отправлены»."""
+    from bot.keyboards import order_stars_sent_kb
     text = (
         f"🆕 Оплачен заказ #{order.id}\n"
         f"👤 User: {user.telegram_id} (@{user.username or '—'})\n"
         f"⭐ Stars: {order.stars_amount}\n"
-        f"💵 Сумма: {order.price} {order.payment_method}"
+        f"💵 Сумма: {order.price} $ ({order.payment_method})"
     )
+    reply_markup = order_stars_sent_kb(order.id)
     for aid in admin_ids:
         try:
-            await bot.send_message(aid, text)
+            await bot.send_message(aid, text, reply_markup=reply_markup)
         except Exception as e:
             logger.warning("Notify admin %s failed: %s", aid, e)
 
 
 async def _send_order_to_channel(bot: Bot, channel_id: int, order: Order, user: User):
-    """Отправка оплаченного заказа в канал/группу (если задан ORDERS_CHANNEL_ID)."""
+    """Отправка оплаченного заказа в канал/группу с кнопкой «Stars отправлены»."""
+    from bot.keyboards import order_stars_sent_kb
     recipient = getattr(order, "recipient_username", None) or "себе"
     if recipient and recipient != "себе" and not recipient.startswith("@"):
         recipient = f"@{recipient}"
@@ -80,7 +83,9 @@ async def _send_order_to_channel(bot: Bot, channel_id: int, order: Order, user: 
         f"⏳ Ожидает отправки."
     )
     try:
-        await bot.send_message(channel_id, text, parse_mode="HTML")
+        await bot.send_message(
+            channel_id, text, parse_mode="HTML", reply_markup=order_stars_sent_kb(order.id)
+        )
     except Exception as e:
         logger.warning("Send order to channel %s failed: %s", channel_id, e)
 
