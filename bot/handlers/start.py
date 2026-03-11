@@ -101,6 +101,19 @@ async def menu_main(callback: CallbackQuery, session: AsyncSession, config: AppC
     await callback.answer()
 
 
+@router.callback_query(F.data == "menu:sell")
+@router.callback_query(F.data == "menu:premium")
+async def menu_coming_soon(callback: CallbackQuery):
+    """Продать звёзды / Premium — функция в разработке."""
+    await edit_or_send_text(
+        callback,
+        "⏳ Функция на стадии разработки.",
+        back_to_menu_kb(),
+        parse_mode=None,
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "menu:support")
 async def menu_support(callback: CallbackQuery, config: AppConfig):
     """Поддержка: ссылка или текст."""

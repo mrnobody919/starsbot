@@ -5,13 +5,21 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню: Купить Stars, Мои заказы, Профиль, Рефералы, Поддержка. Для админов — кнопка «Админ панель»."""
+    """Главное меню: Купить/Продать звёзды, Premium, Профиль, Рефералка, Поддержка, Мои заказы. Для админов — Админ панель."""
     rows = [
-        [InlineKeyboardButton(text="🛒 Купить Stars", callback_data="menu:buy")],
-        [InlineKeyboardButton(text="📋 Мои заказы", callback_data="menu:orders")],
-        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu:profile")],
-        [InlineKeyboardButton(text="👥 Реферальная программа", callback_data="menu:referrals")],
-        [InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support")],
+        [
+            InlineKeyboardButton(text="⭐️ Купить звёзды", callback_data="menu:buy"),
+            InlineKeyboardButton(text="💸 Продать звёзды", callback_data="menu:sell"),
+        ],
+        [InlineKeyboardButton(text="👑 Premium", callback_data="menu:premium")],
+        [
+            InlineKeyboardButton(text="👤 Профиль", callback_data="menu:profile"),
+            InlineKeyboardButton(text="🫂 Рефералка", callback_data="menu:referrals"),
+        ],
+        [
+            InlineKeyboardButton(text="💬 Поддержка", callback_data="menu:support"),
+            InlineKeyboardButton(text="📋 Мои заказы", callback_data="menu:orders"),
+        ],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="🔐 Админ панель", callback_data="admin:main")])
