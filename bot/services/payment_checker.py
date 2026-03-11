@@ -163,7 +163,10 @@ class PaymentChecker:
                                     if not (order.external_payment_id or "").startswith("ton_"):
                                         continue
                                     expected_comment = f"order_{order.id}"
-                                    expected_ton = order.price / ton_usd
+                                    amount_to_match = order.price - (getattr(order, "balance_used", 0) or 0)
+                                    if amount_to_match <= 0:
+                                        amount_to_match = order.price
+                                    expected_ton = amount_to_match / ton_usd
                                     for tr in incoming:
                                         if tr.get("comment", "").strip() != expected_comment:
                                             continue

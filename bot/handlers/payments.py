@@ -85,49 +85,6 @@ async def _send_order_to_channel(bot: Bot, channel_id: int, order: Order, user: 
         logger.warning("Send order to channel %s failed: %s", channel_id, e)
 
 
-async def complete_order_payment(
-    session: AsyncSession,
-    bot: Bot,
-    config: AppConfig,
-    order: Order,
-) -> bool:
-    """
-    Помечает заказ как оплаченный: Transaction, реферальные начисления,
-    уведомление пользователю, админам и в канал заказов.
-    Вызывается из successful_payment, handle_freekassa_paid и из payment_checker.
-    """
-    if order.payment_status == "paid":
-        return True
-    order.payment_status = "paid"
-    session.add(
-        Transaction(order_id=order.id, amount=order.price, currency="USD", status="confirmed")
-    )
-    user = await session.get(User, order.user_id)
-    if user:
-        if user.referred_by:
-            referrer = await session.get(User, user.referred_by)
-            if referrer:
-                reward_usd = order.price * (config.referral_percent / 100)
-                referrer.referral_reward_total += reward_usd
-                referrer.balance_usd = getattr(referrer, "balance_usd", 0.0) + reward_usd
-                session.add(
-                    Referral(
-                        referrer_id=referrer.id,
-                        referred_user_id=user.id,
-                        reward=reward_usd,
-                        order_id=order.id,
-                    )
-                )
-        await session.flush()
-        await _notify_user_order_paid(bot, user.telegram_id, order.id, order.stars_amount)
-        if config.admin_ids:
-            await _notify_admins_new_order(bot, config.admin_ids, order, user)
-        if config.orders_channel_id:
-            await _send_order_to_channel(bot, config.orders_channel_id, order, user)
-    logger.info("Order %s marked paid", order.id)
-    return True
-
-
 def _build_stars_invoice_payload(order_id: int) -> str:
     """Payload для pre_checkout/successful_payment — идентификация заказа."""
     return f"order_{order_id}"
@@ -140,8 +97,8 @@ async def complete_order_payment(
     order: Order,
 ) -> None:
     """
-    Помечает заказ оплаченным: Transaction, реферальные начисления, уведомления.
-    Вызывается из successful_payment, handle_freekassa_paid и из PaymentChecker (CryptoBot/TON).
+    Помечает заказ оплаченным: списание баланса (balance_used), Transaction,
+    реферальные начисления, уведомления.
     """
     if order.payment_status == "paid":
         return
@@ -151,6 +108,11 @@ async def complete_order_payment(
     )
     user = await session.get(User, order.user_id)
     if user:
+        balance_used = getattr(order, "balance_used", 0.0) or 0.0
+        if balance_used > 0:
+            user.balance_usd = (user.balance_usd or 0.0) - balance_used
+            if user.balance_usd < 0:
+                user.balance_usd = 0.0
         if user.referred_by:
             referrer = await session.get(User, user.referred_by)
             if referrer:

@@ -62,6 +62,7 @@ class Order(Base):
     payment_status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, paid
     delivery_status: Mapped[str] = mapped_column(String(32), default="waiting")  # waiting, completed, cancelled
     external_payment_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # ID платежа от платёжки
+    balance_used: Mapped[float] = mapped_column(Float, default=0.0)  # списано с баланса пользователя при оплате
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

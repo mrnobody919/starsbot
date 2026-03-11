@@ -22,14 +22,18 @@ def back_to_recipient_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def payment_method_kb() -> InlineKeyboardMarkup:
-    """Выбор способа оплаты: CryptoBot, TON, СБП (FreeKassa)."""
-    return InlineKeyboardMarkup(inline_keyboard=[
+def payment_method_kb(show_balance: bool = False) -> InlineKeyboardMarkup:
+    """Выбор способа оплаты. Если show_balance — добавляется кнопка «Оплатить с баланса»."""
+    rows = []
+    if show_balance:
+        rows.append([InlineKeyboardButton(text="💰 Оплатить с баланса", callback_data="pay:balance")])
+    rows += [
         [InlineKeyboardButton(text="⭐ CryptoBot (Stars)", callback_data="pay:cryptobot")],
         [InlineKeyboardButton(text="💎 Toncoin", callback_data="pay:ton")],
         [InlineKeyboardButton(text="💳 СБП (рубли)", callback_data="pay:freekassa")],
         [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def confirm_order_kb(order_id: int) -> InlineKeyboardMarkup:

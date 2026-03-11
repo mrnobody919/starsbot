@@ -168,14 +168,16 @@ async def process_amount(
         db_user, _ = await get_or_create_user(session, message.from_user.id, message.from_user.username)
         await session.flush()
 
+    rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
     if balance_usd < quote.amount_usd:
-        rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
-        amount_rub = round(quote.amount_usd * rub_per_usd)
-        await state.update_data(shortage_usd=quote.amount_usd)
+        shortage = quote.amount_usd - balance_usd
+        shortage_rub = round(shortage * rub_per_usd)
+        await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
         text = (
-            f"❌ Вам не хватает {quote.amount_usd:.2f}$ ({amount_rub} ₽) на балансе\n\n"
-            "👇🏻 Выберите способ пополнения из предложенных: 👇🏻\n\n"
+            f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
+            f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub} ₽)\n\n"
+            "👇🏻 Выберите способ оплаты из предложенных: 👇🏻\n\n"
             "💳 СБП — оплата рублями через QR-код\n"
             "💳 Карты — оплата рублями банковской картой\n"
             "🔹 TON — оплата через нативный токен сети TON\n"
@@ -193,11 +195,11 @@ async def process_amount(
     )
     if quote.amount_ton:
         text += f" (~ {quote.amount_ton} TON)"
-    text += "\n\nВыберите способ оплаты:"
+    text += f"\n\n💰 На балансе: {balance_usd:.2f}$\n\nВыберите способ оплаты:"
 
     await message.answer(
         text,
-        reply_markup=payment_method_kb(),
+        reply_markup=payment_method_kb(show_balance=True),
         parse_mode="HTML",
     )
 
@@ -209,9 +211,9 @@ async def choose_payment(
     session: AsyncSession,
     config: AppConfig,
 ):
-    """Выбор способа оплаты: cryptobot, ton, freekassa."""
+    """Выбор способа оплаты: баланс, cryptobot, ton, freekassa."""
     method = callback.data.replace("pay:", "")
-    if method not in ("cryptobot", "ton", "freekassa"):
+    if method not in ("balance", "cryptobot", "ton", "freekassa"):
         await callback.answer("Неизвестный способ.", show_alert=True)
         return
 
@@ -223,7 +225,6 @@ async def choose_payment(
         await callback.answer("Сессия истекла. Начните заново.", show_alert=True)
         return
 
-    # Антифрод: можно ли создать заказ
     result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
     db_user = result.scalar_one_or_none()
     if not db_user:
@@ -234,21 +235,56 @@ async def choose_payment(
         )
         await session.flush()
 
+    balance_usd = (db_user.balance_usd or 0.0) or 0.0
+    if method == "balance":
+        if balance_usd < quote_usd:
+            await callback.answer("Недостаточно средств на балансе.", show_alert=True)
+            return
+        antifraud = _get_antifraud(config)
+        can_order, msg = await antifraud.can_create_order(session, db_user.id)
+        if not can_order:
+            await callback.answer(msg, show_alert=True)
+            return
+        recipient_username = data.get("recipient_display") if data.get("recipient_type") == "gift" else None
+        order = Order(
+            user_id=db_user.id,
+            username=callback.from_user.username,
+            recipient_username=recipient_username,
+            stars_amount=stars,
+            price=quote_usd,
+            payment_method="balance",
+            payment_status="pending",
+            delivery_status="waiting",
+            balance_used=quote_usd,
+        )
+        session.add(order)
+        await session.flush()
+        from bot.handlers.payments import complete_order_payment
+        await complete_order_payment(session, callback.bot, config, order)
+        await session.commit()
+        await state.clear()
+        await callback.message.edit_text(
+            f"✅ Заказ #{order.id} оплачен с баланса ({format_price(quote_usd)}).\n\n"
+            f"Ожидайте отправки {format_stars(stars)}.",
+            reply_markup=back_to_menu_kb(),
+            parse_mode="HTML",
+        )
+        await callback.answer()
+        return
+
     antifraud = _get_antifraud(config)
     can_order, msg = await antifraud.can_create_order(session, db_user.id)
     if not can_order:
         await callback.answer(msg, show_alert=True)
         return
 
-    # Для подарка сохраняем @username получателя; для «купить себе» — None
     recipient_username = data.get("recipient_display") if data.get("recipient_type") == "gift" else None
-    # Создаём заказ в БД (pending)
     order = Order(
         user_id=db_user.id,
         username=callback.from_user.username,
         recipient_username=recipient_username,
         stars_amount=stars,
-        price=quote_usd if method != "freekassa" else quote_usd,
+        price=quote_usd,
         payment_method=method,
         payment_status="pending",
         delivery_status="waiting",
@@ -258,7 +294,6 @@ async def choose_payment(
     await state.update_data(order_id=order.id, payment_method=method)
     await state.set_state(BuyStates.confirmed)
 
-    # Подтверждение
     method_name = {"cryptobot": "CryptoBot (Stars)", "ton": "Toncoin", "freekassa": "FreeKassa"}[method]
     text = (
         f"📋 <b>Подтверждение заказа #{order.id}</b>\n\n"
@@ -409,11 +444,14 @@ def _recipient_from_state(data: dict) -> str | None:
 # --- Оплата заказа при недостатке баланса (СБП / TON / Cryptobot) ---
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:cryptobot")
 async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Оплата заказа через Cryptobot (при недостатке баланса): создаём заказ и инвойс на оплату заказа."""
+    """Оплата заказа через Cryptobot (при недостатке баланса): к оплате в USDT = цена − баланс."""
     await callback.answer("Создаём счёт...")
     data = await state.get_data()
     stars = data.get("stars")
-    quote_usd = data.get("quote_usd") or data.get("shortage_usd") or 1.0
+    quote_usd = data.get("quote_usd") or 1.0
+    shortage_usd = data.get("shortage_usd")
+    if shortage_usd is None or shortage_usd <= 0:
+        shortage_usd = quote_usd
     if not stars or quote_usd <= 0:
         await callback.answer("Введите количество Stars заново.", show_alert=True)
         return
@@ -423,6 +461,13 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     if not db_user:
         db_user, _ = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
         await session.flush()
+    balance_usd = (db_user.balance_usd or 0.0) or 0.0
+    amount_to_pay = min(shortage_usd, quote_usd - balance_usd) if balance_usd < quote_usd else quote_usd
+    if amount_to_pay <= 0:
+        amount_to_pay = quote_usd
+    balance_used = quote_usd - amount_to_pay
+    if balance_used < 0:
+        balance_used = 0.0
     antifraud = _get_antifraud(config)
     can_order, msg = await antifraud.can_create_order(session, db_user.id)
     if not can_order:
@@ -438,6 +483,7 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
         payment_method="cryptobot",
         payment_status="pending",
         delivery_status="waiting",
+        balance_used=balance_used,
     )
     session.add(order)
     await session.flush()
@@ -445,11 +491,10 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     if not crypto.enabled:
         await callback.answer("Cryptobot временно недоступен.", show_alert=True)
         return
-    result = await crypto.create_invoice(
-        amount_stars=stars,
-        description=f"Заказ #{order.id} — {stars} Stars",
+    result = await crypto.create_invoice_usdt(
+        amount_usd=amount_to_pay,
+        description=f"Заказ #{order.id} — {stars} Stars ({amount_to_pay:.2f} USDT)",
         payload=f"order_{order.id}",
-        user_id=callback.from_user.id,
     )
     if not result:
         await callback.answer("Ошибка создания счёта Cryptobot.", show_alert=True)
@@ -467,11 +512,11 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     await state.update_data(order_id=order.id, payment_method="cryptobot")
     await state.set_state(BuyStates.confirmed)
     text = (
-        f"⚡️ Оплата заказа #{order.id}: {format_stars(stars)} — {quote_usd:.2f}$ ( USDT)\n"
-        "❗️ Комиссия Cryptobot составляет ~3%\n"
+        f"⚡️ К оплате: {amount_to_pay:.2f}$ (USDT)"
+        + (f" (с баланса списано: {balance_used:.2f}$)" if balance_used > 0 else "")
+        + "\n❗️ Комиссия Cryptobot ~3%\n"
         f"ID счёта: <code>{invoice_id_str}</code>\n\n"
-        "💳 Для оплаты нажмите «Перейти к оплате» и следуйте дальнейшим инструкциям\n\n"
-        "Счёт для оплаты действителен 60 минут!"
+        "💳 Нажмите «Перейти к оплате». Счёт действителен 60 минут!"
     )
     await callback.message.edit_text(
         text,
@@ -482,12 +527,14 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
 
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:ton")
 async def topup_ton(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Оплата заказа через TON (при недостатке баланса): создаём заказ и ссылку на оплату заказа."""
+    """Оплата заказа через TON (при недостатке баланса): к оплате = цена − баланс."""
     await callback.answer("Создаём ссылку на оплату...")
     data = await state.get_data()
     stars = data.get("stars")
-    quote_usd = data.get("quote_usd") or data.get("shortage_usd") or 1.0
-    quote_ton_val = data.get("quote_ton")
+    quote_usd = data.get("quote_usd") or 1.0
+    shortage_usd = data.get("shortage_usd")
+    if shortage_usd is None or shortage_usd <= 0:
+        shortage_usd = quote_usd
     if not stars:
         await callback.answer("Сессия истекла. Введите количество звёзд заново.", show_alert=True)
         return
@@ -497,6 +544,13 @@ async def topup_ton(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     if not db_user:
         db_user, _ = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
         await session.flush()
+    balance_usd = (db_user.balance_usd or 0.0) or 0.0
+    amount_to_pay = min(shortage_usd, quote_usd - balance_usd) if balance_usd < quote_usd else quote_usd
+    if amount_to_pay <= 0:
+        amount_to_pay = quote_usd
+    balance_used = quote_usd - amount_to_pay
+    if balance_used < 0:
+        balance_used = 0.0
     antifraud = _get_antifraud(config)
     can_order, msg = await antifraud.can_create_order(session, db_user.id)
     if not can_order:
@@ -512,6 +566,7 @@ async def topup_ton(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         payment_method="ton",
         payment_status="pending",
         delivery_status="waiting",
+        balance_used=balance_used,
     )
     session.add(order)
     await session.flush()
@@ -521,23 +576,23 @@ async def topup_ton(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         return
     engine = _get_price_engine(config)
     ton_usd = await engine.get_ton_usd()
-    quote_ton = quote_ton_val if quote_ton_val is not None else (quote_usd / ton_usd if ton_usd and ton_usd > 0 else quote_usd / 5.0)
-    link = ton.build_payment_link(quote_ton, f"order_{order.id}")
+    amount_ton = amount_to_pay / ton_usd if ton_usd and ton_usd > 0 else amount_to_pay / 5.0
+    link = ton.build_payment_link(amount_ton, f"order_{order.id}")
     if not link:
         await callback.answer("Не удалось сформировать ссылку TON.", show_alert=True)
         return
     order.external_payment_id = f"ton_{order.id}"
     await session.flush()
-    await state.update_data(order_id=order.id, payment_method="ton", quote_ton=quote_ton)
+    await state.update_data(order_id=order.id, payment_method="ton", quote_ton=amount_ton)
     await state.set_state(BuyStates.confirmed)
     wallet = config.ton.wallet_address or ""
     text = (
-        f"⚡️ Оплата заказа: {quote_usd:.2f}$\n"
-        f"ID счёта: <code>{order.id}</code>\n\n"
-        f"💷 Переведите ТОЧНУЮ СУММУ: {quote_ton:.4f} TON\n\n"
-        f"👛 На кошелёк:\n<code>{wallet}</code>\n\n"
-        "После транзакции бот автоматически подтвердит Ваш платёж\n\n"
-        "Счёт для оплаты действителен 60 минут!"
+        f"⚡️ К оплате: {amount_to_pay:.2f}$ (~ {amount_ton:.4f} TON)"
+        + (f" (с баланса списано: {balance_used:.2f}$)" if balance_used > 0 else "")
+        + f"\nID счёта: <code>{order.id}</code>\n\n"
+        f"💷 Переведите ТОЧНУЮ СУММУ: {amount_ton:.4f} TON\n\n"
+        f"👛 Кошелёк:\n<code>{wallet}</code>\n\n"
+        "После транзакции бот подтвердит платёж. Счёт действителен 60 минут!"
     )
     await callback.message.edit_text(text, reply_markup=ton_pay_button_kb(link), parse_mode="HTML")
     await callback.answer()
@@ -551,11 +606,14 @@ async def topup_usdt_ton(callback: CallbackQuery, state: FSMContext, config: App
 
 @router.callback_query(BuyStates.choosing_payment, F.data == "topup:sbp")
 async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Оплата заказа через СБП (при недостатке баланса): создаём заказ и ссылку на оплату заказа."""
+    """Оплата заказа через СБП (при недостатке баланса): сумма к оплате = цена − баланс."""
     await callback.answer("Создаём ссылку на оплату...")
     data = await state.get_data()
     stars = data.get("stars")
-    quote_usd = data.get("quote_usd") or data.get("shortage_usd") or 1.0
+    quote_usd = data.get("quote_usd") or 1.0
+    shortage_usd = data.get("shortage_usd")
+    if shortage_usd is None or shortage_usd <= 0:
+        shortage_usd = quote_usd
     if not stars:
         await callback.answer("Сессия истекла. Введите количество звёзд заново.", show_alert=True)
         return
@@ -565,6 +623,13 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     if not db_user:
         db_user, _ = await get_or_create_user(session, callback.from_user.id, callback.from_user.username)
         await session.flush()
+    balance_usd = (db_user.balance_usd or 0.0) or 0.0
+    amount_to_pay = min(shortage_usd, quote_usd - balance_usd) if balance_usd < quote_usd else quote_usd
+    if amount_to_pay <= 0:
+        amount_to_pay = quote_usd
+    balance_used = quote_usd - amount_to_pay
+    if balance_used < 0:
+        balance_used = 0.0
     antifraud = _get_antifraud(config)
     can_order, msg = await antifraud.can_create_order(session, db_user.id)
     if not can_order:
@@ -580,12 +645,13 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         payment_method="freekassa",
         payment_status="pending",
         delivery_status="waiting",
+        balance_used=balance_used,
     )
     session.add(order)
     await session.flush()
     await state.update_data(order_id=order.id, payment_method="freekassa")
     rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
-    amount_rub = round(quote_usd * rub_per_usd)
+    amount_rub = round(amount_to_pay * rub_per_usd)
     fk = FreeKassaService(config.freekassa)
     notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa" if config.webhook_base_url else None
     pay_url = fk.create_order(
@@ -603,11 +669,12 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     order.external_payment_id = str(order.id)
     await session.flush()
     text = (
-        f"⚡️ Оплата заказа: {quote_usd:.2f}$ ({amount_rub} ₽)\n"
-        "❗️ Комиссия кассы составляет 4%\n"
+        f"⚡️ К оплате: {amount_to_pay:.2f}$ ({amount_rub} ₽)"
+        + (f" (с баланса списано: {balance_used:.2f}$)" if balance_used > 0 else "")
+        + "\n❗️ Комиссия кассы 4%\n"
         f"ID счёта: <code>{order.id}</code>\n\n"
-        "💳 Для оплаты нажмите «💷 Оплатить счёт» и следуйте дальнейшим инструкциям\n\n"
-        "Счёт для оплаты действителен 60 минут!"
+        "💳 Нажмите «💷 Оплатить счёт» и следуйте инструкциям.\n\n"
+        "Счёт действителен 60 минут!"
     )
     await callback.message.edit_text(text, reply_markup=sbp_pay_button_kb(pay_url), parse_mode="HTML")
     await state.set_state(BuyStates.confirmed)
