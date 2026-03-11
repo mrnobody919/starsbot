@@ -174,7 +174,9 @@ async def process_amount(
         shortage_rub = round(shortage * rub_per_usd)
         await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
+        total_rub = round(quote.amount_usd * rub_per_usd)
         text = (
+            f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub} ₽)\n\n"
             f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
             f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub} ₽)\n\n"
             "👇🏻 Выберите способ оплаты из предложенных: 👇🏻\n\n"
