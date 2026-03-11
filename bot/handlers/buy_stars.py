@@ -578,7 +578,8 @@ async def topup_ton(callback: CallbackQuery, state: FSMContext, session: AsyncSe
         return
     engine = _get_price_engine(config)
     ton_usd = await engine.get_ton_usd()
-    amount_ton = amount_to_pay / ton_usd if ton_usd and ton_usd > 0 else amount_to_pay / 5.0
+    # Fallback ~1.33 USD за 1 TON, если курс недоступен (раньше было /5 → давало заниженную сумму в TON)
+    amount_ton = amount_to_pay / ton_usd if ton_usd and ton_usd > 0 else amount_to_pay / 1.33
     link = ton.build_payment_link(amount_ton, f"order_{order.id}")
     if not link:
         await callback.answer("Не удалось сформировать ссылку TON.", show_alert=True)

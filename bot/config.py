@@ -93,9 +93,9 @@ class FreeKassaConfig:
 class PriceConfig:
     """Настройки ценового движка. Курс Stars: 1 Star = usd_per_star USD. TON: сумма_ton = сумма_usd / курс_ton_usd."""
     usd_per_star: float = 0.0175  # 1 звезда = 0.0175 USD (курс Telegram Stars)
-    ton_usd_rate: Optional[float] = None  # курс TON к USD: 1 TON = N USD (например 1.33). Сумма в TON = сумма_usd / ton_usd_rate
+    ton_usd_rate: Optional[float] = None  # курс: 1 TON = N USD (например 1.33), либо 0.751 = 0.751 TON за 1$ (бот пересчитает)
     ton_per_star: Optional[float] = None  # альтернатива: 1 звезда = N TON (если задано и нет ton_usd_rate)
-    ton_usd_url: str = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd"
+    ton_usd_url: str = "https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT"  # курс 1 TON в USD (Binance), без ключа
     update_interval_seconds: int = 600  # 10 минут — автообновление курса TON/USD (если не задан фиксированный курс)
     # Скидки: (мин. сумма заказа в Stars, множитель цены 0.0-1.0)
     discount_tiers: tuple = ((1000, 0.98), (5000, 0.95), (10000, 0.92))
@@ -106,10 +106,12 @@ class PriceConfig:
         ton_per_star = float(ton_per_star_str) if ton_per_star_str else None
         ton_usd_str = os.getenv("TON_USD_RATE", "").strip()
         ton_usd_rate = float(ton_usd_str) if ton_usd_str else None
+        ton_usd_url = os.getenv("TON_USD_URL", "").strip() or "https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT"
         return cls(
             usd_per_star=float(os.getenv("USD_PER_STAR", "0.0175")),
             ton_usd_rate=ton_usd_rate if (ton_usd_rate and ton_usd_rate > 0) else None,
             ton_per_star=ton_per_star if (ton_per_star and ton_per_star > 0) else None,
+            ton_usd_url=ton_usd_url,
             update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
         )
 

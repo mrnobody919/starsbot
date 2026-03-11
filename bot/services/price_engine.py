@@ -43,16 +43,24 @@ class PriceEngine:
         return mult
 
     async def fetch_ton_usd(self) -> Optional[float]:
-        """Загружает курс TON/USD с CoinGecko. При 429 (rate limit) возвращает None."""
+        """
+        Загружает курс TON/USD с настроенного URL.
+        По умолчанию Binance (TONUSDT): {"symbol":"TONUSDT","price":"5.12"} → 5.12 USD за 1 TON.
+        Поддерживается и CoinGecko: {"the-open-network":{"usd":1.33}} — задайте TON_USD_URL в .env.
+        """
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(self.config.ton_usd_url)
                 if r.status_code == 429:
-                    logger.warning("CoinGecko rate limit (429). Используется кэш или следующий запрос позже.")
+                    logger.warning("Rate limit (429). Используется кэш курса.")
                     return None
                 r.raise_for_status()
                 data = r.json()
-                # CoinGecko: ids=the-open-network
+                # Binance: {"symbol":"TONUSDT","price":"5.12"}
+                price = data.get("price")
+                if price is not None:
+                    return float(price)
+                # CoinGecko: {"the-open-network":{"usd":1.33}}
                 price = data.get("the-open-network", {}).get("usd")
                 if price is not None:
                     return float(price)
@@ -70,13 +78,18 @@ class PriceEngine:
 
     async def get_ton_usd(self) -> Optional[float]:
         """
-        Возвращает курс TON/USD (сколько USD стоит 1 TON).
-        Сумма в TON = сумма_usd / get_ton_usd().
-        Приоритет: 1) TON_USD_RATE, 2) TON_PER_STAR (выводим курс из Stars), 3) CoinGecko.
+        Возвращает курс: сколько USD стоит 1 TON. Сумма в TON = сумма_usd / get_ton_usd().
+        Приоритет: 1) TON_USD_RATE, 2) TON_PER_STAR, 3) API (по умолчанию Binance TONUSDT).
+        TON_USD_RATE можно задать в двух форматах:
+        - больше 1: 1 TON = N USD (например 1.33);
+        - от 0 до 1: 1 USD = N TON (например 0.751 → считаем 1 TON = 1/0.751 USD).
         """
         ton_usd_rate = getattr(self.config, "ton_usd_rate", None)
         if ton_usd_rate and ton_usd_rate > 0:
-            return ton_usd_rate
+            # 0 < rate <= 1 обычно значит "TON за 1 USD" (0.751 TON/$)
+            if ton_usd_rate <= 1.0:
+                return 1.0 / ton_usd_rate  # 1 TON = 1/0.751 ≈ 1.33 USD
+            return ton_usd_rate  # > 1: 1 TON = rate USD
         ton_per_star = getattr(self.config, "ton_per_star", None)
         if ton_per_star and ton_per_star > 0:
             return self.config.usd_per_star / ton_per_star
