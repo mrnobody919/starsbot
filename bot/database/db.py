@@ -35,12 +35,15 @@ def get_async_database_url(sync_url: str) -> str:
 def create_engine(database_url: str):
     """
     Создаёт async engine. NullPool удобен для serverless/Railway.
+    Таймаут подключения увеличен — на Railway БД иногда отвечает с задержкой при холодном старте.
     """
     url = get_async_database_url(database_url)
+    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))  # секунды до таймаута одной попытки
     return create_async_engine(
         url,
         poolclass=NullPool,
         echo=False,
+        connect_args={"timeout": connect_timeout},
     )
 
 
@@ -49,8 +52,8 @@ async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
     Создаёт таблицы и возвращает фабрику сессий.
     При старте на Railway повторяет попытки подключения (DNS/сеть могут быть не готовы).
     """
-    max_attempts = int(os.getenv("DB_CONNECT_ATTEMPTS", "5"))
-    delay_sec = float(os.getenv("DB_CONNECT_DELAY", "5"))
+    max_attempts = int(os.getenv("DB_CONNECT_ATTEMPTS", "8"))
+    delay_sec = float(os.getenv("DB_CONNECT_DELAY", "8"))
     last_error = None
     engine = create_engine(database_url)
     for attempt in range(1, max_attempts + 1):

@@ -1,33 +1,38 @@
 """
-Интеграция FreeKassa: создание платежа, проверка подписи webhook.
+Интеграция FreeKassa: ссылка на оплату по SCI (форма с подписью), проверка webhook.
+Подпись формы: MD5(merchant_id:amount:secret_word_1:currency:order_id).
+URL оповещения настраивается в личном кабинете FreeKassa.
 """
-import asyncio
 import hashlib
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import urlencode
-
-import httpx
 
 from bot.config import FreeKassaConfig
 from bot.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-FREEKASSA_CREATE_URL = "https://api.freekassa.ru/v1/orders/create"
+# Форма оплаты FreeKassa (SCI) — GET с параметрами m, oa, currency, o, s
+FREEKASSA_PAY_URL = "https://pay.fk.money/"
 
 
 class FreeKassaService:
-    """Создание заказа в FreeKassa и верификация webhook."""
+    """Формирование ссылки на оплату FreeKassa (СБП/карты) и верификация webhook."""
 
     def __init__(self, config: FreeKassaConfig):
         self.config = config
 
-    def _sign(self, *parts: str) -> str:
-        """Подпись для FreeKassa (MD5 от конкатенации секретного слова и полей)."""
-        s = "".join(str(p) for p in parts)
-        return hashlib.md5(s.encode()).hexdigest()
+    def _sign_sci(self, merchant_id: str, amount: str, secret: str, currency: str, order_id: str) -> str:
+        """Подпись для формы оплаты: MD5(merchant_id:amount:secret:currency:order_id)."""
+        raw = f"{merchant_id}:{amount}:{secret}:{currency}:{order_id}"
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
-    async def create_order(
+    def _sign_notification(self, merchant_id: str, amount: str, secret: str, order_id: str) -> str:
+        """Подпись уведомления от FreeKassa (SECRET_WORD_2): MD5(MERCHANT_ID:AMOUNT:SECRET:ORDER_ID) или конкатенация — см. док."""
+        raw = f"{merchant_id}:{amount}:{secret}:{order_id}"
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+    def create_order(
         self,
         amount: float,
         currency: str,
@@ -38,69 +43,49 @@ class FreeKassaService:
         notification_url: Optional[str] = None,
     ) -> Optional[str]:
         """
-        Создаёт платёж в FreeKassa и возвращает URL для перенаправления пользователя.
-        amount — сумма, currency — например RUB, USD.
-        order_id — уникальный ID заказа в нашей системе.
+        Формирует ссылку на оплату FreeKassa (SCI). Не делает запросов к API.
+        amount — сумма (число, для RUB — рубли).
+        currency — RUB, USD и т.д.
+        order_id — уникальный номер заказа в нашей системе.
+        URL оповещения задаётся в личном кабинете FreeKassa (URL оповещения).
         """
         if not self.config.merchant_id or not self.config.secret_word_1:
+            logger.warning("FreeKassa: не заданы MERCHANT_ID или SECRET_WORD_1")
             return None
-        signature = self._sign(self.config.merchant_id, amount, self.config.secret_word_1, order_id)
-
-        payload = {
-            "shopId": self.config.merchant_id,
-            "nonce": order_id,
-            "paymentId": order_id,
-            "amount": amount,
+        # Сумму передаём как строку без лишних знаков (целое для RUB)
+        amount_str = str(int(round(amount))) if currency == "RUB" else str(round(amount, 2))
+        sign = self._sign_sci(
+            self.config.merchant_id,
+            amount_str,
+            self.config.secret_word_1,
+            currency,
+            order_id,
+        )
+        params = {
+            "m": self.config.merchant_id,
+            "oa": amount_str,
             "currency": currency,
-            "email": email or "noreply@example.com",
-            "success_url": success_url or "https://t.me/",
-            "failure_url": failure_url or "https://t.me/",
-            "sign": signature,
+            "o": order_id,
+            "s": sign,
         }
-        if notification_url:
-            payload["notification_url"] = notification_url
-
-        # С Railway до api.freekassa.ru бывают таймауты — несколько попыток и увеличенный timeout
-        timeout_sec = 45.0
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=timeout_sec) as client:
-                    r = await client.post(FREEKASSA_CREATE_URL, json=payload)
-                    if r.status_code != 200:
-                        logger.warning("FreeKassa create order: %s %s", r.status_code, r.text)
-                        return None
-                    data = r.json()
-                    url = data.get("url") or data.get("payment_url")
-                    if url:
-                        return url
-                    logger.warning("FreeKassa no URL in response: %s", data)
-                    return None
-            except (httpx.ConnectTimeout, httpx.ConnectError) as e:
-                if attempt < 2:
-                    delay = 3.0 + attempt * 2.0  # 3s, 5s перед повтором
-                    logger.warning("FreeKassa create_order попытка %s: %s, повтор через %.0f с", attempt + 1, e, delay)
-                    await asyncio.sleep(delay)
-                    continue
-                logger.exception("FreeKassa create_order: %s", e)
-                return None
-            except Exception as e:
-                logger.exception("FreeKassa create_order: %s", e)
-                return None
-        return None
+        if email:
+            params["em"] = email
+        url = FREEKASSA_PAY_URL + "?" + urlencode(params)
+        logger.info("FreeKassa SCI URL сформирован для заказа %s, сумма %s %s", order_id, amount_str, currency)
+        return url
 
     def verify_notification(self, payload: dict) -> bool:
         """
-        Проверяет подпись уведомления от FreeKassa (MERCHANT_ID:AMOUNT:SECRET_WORD_2:ORDER_ID).
+        Проверяет подпись уведомления от FreeKassa.
+        Формула по документации: MD5(MERCHANT_ID:AMOUNT:SECRET_WORD_2:MERCHANT_ORDER_ID).
         """
         merchant_id = str(payload.get("MERCHANT_ID", ""))
         amount = str(payload.get("AMOUNT", ""))
         order_id = str(payload.get("MERCHANT_ORDER_ID", ""))
-        sign = str(payload.get("SIGN", ""))
-
-        expected = self._sign(
-            merchant_id,
-            amount,
-            self.config.secret_word_2,
-            order_id,
+        sign = str(payload.get("SIGN", "")).strip()
+        if not sign or not self.config.secret_word_2:
+            return False
+        expected = self._sign_notification(
+            merchant_id, amount, self.config.secret_word_2, order_id
         )
         return sign.lower() == expected.lower()

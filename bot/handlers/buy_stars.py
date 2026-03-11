@@ -309,7 +309,7 @@ async def confirm_and_pay(
         notification_url = None
         if config.webhook_base_url:
             notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa"
-        pay_url = await fk.create_order(
+        pay_url = fk.create_order(
             amount=price_usd,
             currency="USD",
             order_id=str(order.id),
@@ -492,7 +492,7 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     order_id = f"topup_{db_user.id}_{uuid.uuid4().hex[:8]}"
     fk = FreeKassaService(config.freekassa)
     notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa" if config.webhook_base_url else None
-    pay_url = await fk.create_order(
+    pay_url = fk.create_order(
         amount=amount_rub,
         currency="RUB",
         order_id=order_id,
