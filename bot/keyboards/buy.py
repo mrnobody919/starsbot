@@ -8,8 +8,8 @@ def recipient_choice_kb() -> InlineKeyboardMarkup:
     """Выбор: купить себе / подарить другу / назад."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Купить себе", callback_data="buy:recipient_self"),
-            InlineKeyboardButton(text="Подарить другу", callback_data="buy:recipient_gift"),
+            InlineKeyboardButton(text="🫵 Купить себе", callback_data="buy:recipient_self"),
+            InlineKeyboardButton(text="👥Подарить другу", callback_data="buy:recipient_gift"),
         ],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="menu:main")],
     ])
