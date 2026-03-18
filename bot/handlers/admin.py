@@ -3,7 +3,7 @@
 """
 from datetime import datetime, timedelta
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
@@ -217,18 +217,75 @@ async def admin_stats(callback: CallbackQuery, session: AsyncSession, config: Ap
 
 @router.callback_query(F.data == "admin:users")
 async def admin_users(callback: CallbackQuery, session: AsyncSession, config: AppConfig):
-    """Список пользователей (краткий)."""
+    """Экспорт всех пользователей в Excel (.xlsx)."""
     if not _is_admin(callback.from_user.id, config):
         await callback.answer()
         return
-    result = await session.execute(select(User).order_by(User.created_at.desc()).limit(30))
+    await callback.answer("Готовлю Excel с пользователями...")
+
+    result = await session.execute(select(User).order_by(User.created_at.desc()))
     users = list(result.scalars().all())
-    lines = ["👥 Последние пользователи:\n"]
-    for u in users[:15]:
-        block = "🚫" if u.is_blocked else ""
-        lines.append(f"{block} {u.telegram_id} @{u.username or '—'}")
-    await callback.message.edit_text("\n".join(lines), reply_markup=admin_main_kb())
-    await callback.answer()
+
+    # Локальные импорты, чтобы не грузить openpyxl без надобности
+    import os
+    import tempfile
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Users"
+
+    headers = [
+        "id",
+        "telegram_id",
+        "username",
+        "balance_stars",
+        "balance_usd",
+        "referral_code",
+        "referred_by",
+        "referral_reward_total",
+        "referrals_count",
+        "is_blocked",
+        "created_at",
+    ]
+    ws.append(headers)
+
+    for u in users:
+        ws.append(
+            [
+                u.id,
+                u.telegram_id,
+                u.username or "",
+                float(u.balance_stars or 0),
+                float(u.balance_usd or 0),
+                u.referral_code or "",
+                u.referred_by if u.referred_by is not None else "",
+                float(u.referral_reward_total or 0),
+                u.referrals_count,
+                bool(u.is_blocked),
+                u.created_at,
+            ]
+        )
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        wb.save(tmp_path)
+        await callback.bot.send_document(
+            chat_id=callback.from_user.id,
+            document=FSInputFile(tmp_path),
+            caption=f"✅ Excel экспорт: пользователей {len(users)}",
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    # Вернёмся в главное меню админки
+    await callback.message.edit_text("🔐 Экспорт готов. Вы в админ-меню.", reply_markup=admin_main_kb())
 
 
 @router.callback_query(F.data.startswith("admin:user:block:"))
