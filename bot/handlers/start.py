@@ -55,6 +55,14 @@ async def cmd_start(message: Message, session: AsyncSession, config: AppConfig):
     await session.commit()
     if created:
         logger.info("New user: %s (%s)", user.id, user.username)
+        # Уведомление админам о новом пользователе
+        uname = f"@{user.username}" if user.username else "—"
+        admin_text = f"Новый пользователь!\n{uname}\n{user.id}"
+        for admin_id in (config.admin_ids or []):
+            try:
+                await message.bot.send_message(admin_id, admin_text)
+            except Exception as e:
+                logger.warning("Failed to notify admin %s about new user %s: %s", admin_id, user.id, e)
 
     is_admin = user.id in config.admin_ids
     welcome = (
