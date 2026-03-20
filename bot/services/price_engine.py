@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import httpx
+import time
 
 from bot.config import PriceConfig
 from bot.utils.logger import get_logger
@@ -34,6 +35,9 @@ class PriceEngine:
         self._ton_rub: Optional[float] = None
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task] = None
+        # Защита от спама запросами при 429: если обновление не удалось,
+        # следующие попытки делаем через cooldown.
+        self._next_fetch_at: float = 0.0
 
     def _discount_multiplier(self, stars: int) -> float:
         """Возвращает множитель цены (1.0 = без скидки, 0.95 = 5% скидка)."""
@@ -56,6 +60,8 @@ class PriceEngine:
                 r = await client.get(self.config.ton_usd_url)
                 if r.status_code == 429:
                     logger.warning("Rate limit (429). Используется кэш курса.")
+                    # Кулдаун на повторные попытки загрузки курса
+                    self._next_fetch_at = time.time() + int(getattr(self.config, "update_interval_seconds", 600))
                     return None, None
                 r.raise_for_status()
                 data = r.json()
@@ -73,10 +79,16 @@ class PriceEngine:
                 return usd_val, rub_val
         except Exception as e:
             logger.warning("Не удалось получить курс TON: %s", e)
+            # Кулдаун, чтобы на временных сбоях не долбить API
+            self._next_fetch_at = time.time() + 300
         return None, None
 
     async def update_ton_rate(self) -> None:
         """Обновляет курсы TON/USD и TON/RUB. При 429 курс не меняется (остаётся кэш)."""
+        # Если недавно уже были ошибки загрузки — пропускаем попытку.
+        now = time.time()
+        if now < self._next_fetch_at:
+            return
         usd, rub = await self.fetch_ton_prices()
         async with self._lock:
             if usd is not None and usd > 0:
