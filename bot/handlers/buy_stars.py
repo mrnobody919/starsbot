@@ -197,20 +197,20 @@ async def process_amount(
     if balance_usd < quote.amount_usd:
         shortage = quote.amount_usd - balance_usd
         if ton_rub and quote.amount_ton:
-            shortage_rub = round((shortage / max(ton_usd, 1e-9)) * ton_rub)
+            shortage_rub = round((shortage / max(ton_usd, 1e-9)) * ton_rub, 2)
         else:
-            shortage_rub = round(shortage * rub_per_usd)
+            shortage_rub = round(shortage * rub_per_usd, 2)
         await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
         if ton_rub and quote.amount_ton:
-            total_rub = round(quote.amount_ton * ton_rub)
+            total_rub = round(quote.amount_ton * ton_rub, 2)
         else:
-            total_rub = round(quote.amount_usd * rub_per_usd)
+            total_rub = round(quote.amount_usd * rub_per_usd, 2)
         ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
         text = (
-            f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub} ₽){ton_part}\n\n"
-            f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
-            f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub} ₽)\n\n"
+            f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub:.2f} ₽){ton_part}\n\n"
+            f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub:.2f} ₽) на балансе\n\n"
+            f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub:.2f} ₽)\n\n"
             "👇🏻 Выберите способ оплаты из предложенных: 👇🏻\n\n"
             "💳 СБП — оплата рублями через QR-код\n"
             "💳 Карты — оплата рублями банковской картой\n"
@@ -225,13 +225,13 @@ async def process_amount(
     await state.set_state(BuyStates.choosing_payment)
     rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
     if ton_rub and quote.amount_ton:
-        total_rub = round(quote.amount_ton * ton_rub)
+        total_rub = round(quote.amount_ton * ton_rub, 2)
     else:
-        total_rub = round(quote.amount_usd * rub_per_usd)
+        total_rub = round(quote.amount_usd * rub_per_usd, 2)
     ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
     text = (
         f"⭐ <b>{format_stars(value)}</b>\n\n"
-        f"Стоимость: {format_price(quote.amount_usd)} ({total_rub} ₽){ton_part}"
+        f"Стоимость: {format_price(quote.amount_usd)} ({total_rub:.2f} ₽){ton_part}"
     )
     if quote.amount_ton:
         # уже добавлено выше в ton_part
@@ -448,7 +448,8 @@ async def confirm_and_pay(
                 )
                 invoice_id_str = str(invoice_id) if invoice_id is not None else ""
                 if pay_url:
-                    amount_usd = order.price
+                    # CryptoBot взимает комиссию; для пользователя показываем сумму с +3%
+                    amount_usd = order.price * 1.03
                     text = (
                         f"⚡️ Оплата заказа #{order.id}: {format_stars(stars)} — ${amount_usd:.2f} ( USDT)\n"
                         f"❗️ Комиссия Cryptobot составляет ~3%\n"
@@ -509,6 +510,8 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     balance_used = quote_usd - amount_to_pay
     if balance_used < 0:
         balance_used = 0.0
+    # Для внешней оплаты USDT учитываем комиссию CryptoBot ~3%
+    amount_to_pay_with_fee = amount_to_pay * 1.03
     antifraud = _get_antifraud(config)
     can_order, msg = await antifraud.can_create_order(session, db_user.id)
     if not can_order:
@@ -533,8 +536,8 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
         await callback.answer("Cryptobot временно недоступен.", show_alert=True)
         return
     result = await crypto.create_invoice_usdt(
-        amount_usd=amount_to_pay,
-        description=f"Заказ #{order.id} — {stars} Stars ({amount_to_pay:.2f} USDT)",
+        amount_usd=amount_to_pay_with_fee,
+        description=f"Заказ #{order.id} — {stars} Stars ({amount_to_pay_with_fee:.2f} USDT)",
         payload=f"order_{order.id}",
     )
     if not result:
@@ -553,7 +556,7 @@ async def topup_cryptobot(callback: CallbackQuery, state: FSMContext, session: A
     await state.update_data(order_id=order.id, payment_method="cryptobot")
     await state.set_state(BuyStates.confirmed)
     text = (
-        f"⚡️ К оплате: {amount_to_pay:.2f}$ (USDT)"
+        f"⚡️ К оплате: {amount_to_pay_with_fee:.2f}$ (USDT)"
         + (f" (с баланса списано: {balance_used:.2f}$)" if balance_used > 0 else "")
         + "\n❗️ Комиссия Cryptobot ~3%\n"
         f"ID счёта: <code>{invoice_id_str}</code>\n\n"
@@ -692,8 +695,20 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     session.add(order)
     await session.flush()
     await state.update_data(order_id=order.id, payment_method="freekassa")
-    rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
-    amount_rub = round(amount_to_pay * rub_per_usd)
+
+    # Важно: сумма в ₽ для СБП должна совпадать с тем, что бот показывает пользователю.
+    # Сейчас бот считает ₽ из курса TON->RUB, поэтому и здесь делаем конвертацию через TON,
+    # а не через фиксированный RUB_PER_USD.
+    engine = _get_price_engine(config)
+    ton_usd = await engine.get_ton_usd()
+    ton_rub = await engine.get_ton_rub()
+    if ton_usd and ton_rub and ton_usd > 0:
+        # 1 USD = (RUB per TON) / (USD per TON)
+        rub_per_usd_dynamic = ton_rub / ton_usd
+        amount_rub = round(amount_to_pay * rub_per_usd_dynamic, 2)
+    else:
+        rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
+        amount_rub = round(amount_to_pay * rub_per_usd, 2)
     fk = FreeKassaService(config.freekassa)
     notification_url = f"{config.webhook_base_url.rstrip('/')}/webhook/freekassa" if config.webhook_base_url else None
     pay_url = fk.create_order(
@@ -711,7 +726,7 @@ async def topup_sbp(callback: CallbackQuery, state: FSMContext, session: AsyncSe
     order.external_payment_id = str(order.id)
     await session.flush()
     text = (
-        f"⚡️ К оплате: {amount_to_pay:.2f}$ ({amount_rub} ₽)"
+        f"⚡️ К оплате: {amount_to_pay:.2f}$ ({amount_rub:.2f} ₽)"
         + (f" (с баланса списано: {balance_used:.2f}$)" if balance_used > 0 else "")
         + "\n❗️ Комиссия кассы 4%\n"
         f"ID счёта: <code>{order.id}</code>\n\n"

@@ -34,7 +34,7 @@ async def send_payment_received_message(
     try:
         await bot.send_message(
             telegram_id,
-            f"✅ На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.0f} ₽). Спасибо за пополнение!",
+            f"✅ На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.2f} ₽). Спасибо за пополнение!",
         )
     except Exception as e:
         logger.warning("Send payment received to %s failed: %s", telegram_id, e)
@@ -241,7 +241,7 @@ async def handle_freekassa_topup(
     try:
         await bot.send_message(
             user.telegram_id,
-            f"✅ Пополнение выполнено. На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.0f} ₽).\n\n"
+            f"✅ Пополнение выполнено. На ваш баланс зачислено {amount_usd:.2f} $ ({amount_rub:.2f} ₽).\n\n"
             f"Теперь вы можете вернуться в бот и оплатить заказ Stars с баланса.",
         )
     except Exception as e:
