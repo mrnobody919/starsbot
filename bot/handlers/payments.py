@@ -150,23 +150,28 @@ async def complete_order_payment(
     Помечает заказ оплаченным: списание баланса (balance_used), Transaction,
     реферальные начисления, уведомления.
     """
-    # Идемпотентность: если из-за ретраев/параллельных вызовов функция
-    # будет запущена повторно, то только первый вызов реально переведёт заказ в paid.
-    # Второй вызов должен выйти без повторных уведомлений.
-    res = await session.execute(
-        update(Order)
-        .where(Order.id == order.id, Order.payment_status != "paid")
-        .values(payment_status="paid")
-    )
-    if getattr(res, "rowcount", 0) == 0:
+    # Защита от дублей при параллельных вызовах:
+    # блокируем строку заказа FOR UPDATE, и только первый поток переведёт payment_status в paid.
+    locked = await session.execute(select(Order).where(Order.id == order.id).with_for_update())
+    db_order = locked.scalar_one_or_none()
+    if not db_order:
         return
-    order.payment_status = "paid"
+    if db_order.payment_status == "paid":
+        return
+
+    db_order.payment_status = "paid"
     session.add(
-        Transaction(order_id=order.id, amount=order.price, currency="USD", status="confirmed")
+        Transaction(
+            order_id=db_order.id,
+            amount=db_order.price,
+            currency="USD",
+            status="confirmed",
+        )
     )
-    user = await session.get(User, order.user_id)
+
+    user = await session.get(User, db_order.user_id)
     if user:
-        balance_used = getattr(order, "balance_used", 0.0) or 0.0
+        balance_used = getattr(db_order, "balance_used", 0.0) or 0.0
         if balance_used > 0:
             user.balance_usd = (user.balance_usd or 0.0) - balance_used
             if user.balance_usd < 0:
@@ -174,7 +179,7 @@ async def complete_order_payment(
         if user.referred_by:
             referrer = await session.get(User, user.referred_by)
             if referrer:
-                reward_usd = order.price * (config.referral_percent / 100)
+                reward_usd = db_order.price * (config.referral_percent / 100)
                 referrer.referral_reward_total += reward_usd
                 referrer.balance_usd = getattr(referrer, "balance_usd", 0.0) + reward_usd
                 session.add(
@@ -182,15 +187,15 @@ async def complete_order_payment(
                         referrer_id=referrer.id,
                         referred_user_id=user.id,
                         reward=reward_usd,
-                        order_id=order.id,
+                        order_id=db_order.id,
                     )
                 )
         await session.flush()
-        await _notify_user_order_paid(bot, user.telegram_id, order)
+        await _notify_user_order_paid(bot, user.telegram_id, db_order)
         if config.admin_ids:
-            await _notify_admins_new_order(bot, config.admin_ids, order, user)
+            await _notify_admins_new_order(bot, config.admin_ids, db_order, user)
         if config.orders_channel_id:
-            await _send_order_to_channel(bot, config.orders_channel_id, order, user)
+            await _send_order_to_channel(bot, config.orders_channel_id, db_order, user)
     logger.info("Order %s marked paid (complete_order_payment)", order.id)
 
 
