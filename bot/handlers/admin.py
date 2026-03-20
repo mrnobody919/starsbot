@@ -10,7 +10,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User, Order, Transaction, AdminLog
-from bot.database.repository import get_usd_per_star, set_usd_per_star
+from bot.database.repository import (
+    get_margin_percent,
+    set_margin_percent,
+    get_ton_per_100stars,
+    set_ton_per_100stars,
+)
 from bot.keyboards import (
     admin_main_kb,
     admin_orders_filter_kb,
@@ -37,7 +42,8 @@ class BroadcastStates(StatesGroup):
 
 
 class PriceStates(StatesGroup):
-    entering_usd_per_star = State()
+    entering_ton_per_100stars = State()
+    entering_margin_percent = State()
 
 
 async def _log_admin(session: AsyncSession, admin_id: int, action: str, details: str | None = None):
@@ -332,41 +338,131 @@ async def admin_user_unblock(callback: CallbackQuery, session: AsyncSession, con
 
 @router.callback_query(F.data == "admin:price")
 async def admin_price_show(callback: CallbackQuery, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Показать текущий курс Stars и предложить ввести новый."""
+    """Показать текущую цену Stars (через TON за 100 ⭐) и попросить ввести новую."""
     if not _is_admin(callback.from_user.id, config):
         await callback.answer("Доступ запрещён.", show_alert=True)
         return
-    current = await get_usd_per_star(session, config.price.usd_per_star)
-    await state.set_state(PriceStates.entering_usd_per_star)
+
+    ton_per_100stars = await get_ton_per_100stars(session, default=None)
+    margin_percent = await get_margin_percent(session, default=0.0)
+
+    # Пытаемся вывести справочные USD/₽ значения, если доступен TON/USD
+    usd_per_star = None
+    rub_per_star = None
+    ton_per_star_with_margin = None
+    if ton_per_100stars:
+        try:
+            from bot.services.price_engine import PriceEngine
+            engine = PriceEngine(config.price)
+            ton_usd = await engine.get_ton_usd()
+            if ton_usd and ton_usd > 0:
+                ton_per_star_base = ton_per_100stars / 100.0
+                ton_per_star_with_margin = ton_per_star_base * (1.0 + margin_percent / 100.0)
+                usd_per_star = ton_per_star_with_margin * ton_usd
+                rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
+        except Exception:
+            pass
+
+    await state.set_state(PriceStates.entering_ton_per_100stars)
     await callback.message.edit_text(
-        f"💵 <b>Курс Stars</b>\n\n"
-        f"Сейчас: 1 ⭐ = <b>{current:.4f}$</b>\n\n"
-        "Введите новый курс (одно число), например <code>0.0175</code> или <code>0.02</code>:",
+        "💎 <b>Цена Stars</b>\n\n"
+        + (f"Сейчас: 100 ⭐ = <b>{ton_per_100stars:.6f} TON</b>\n" if ton_per_100stars else "Сейчас: не задано\n")
+        + f"Маржа: <b>{margin_percent:.2f}%</b>\n\n"
+        + (
+            "1 ⭐ с маржой: "
+            f"<b>{ton_per_star_with_margin:.6f} TON</b> / "
+            f"<b>{usd_per_star:.4f}$</b> / "
+            f"<b>{rub_per_star:.0f} ₽</b>\n\n"
+            if usd_per_star is not None and rub_per_star is not None and ton_per_star_with_margin is not None
+            else "\n"
+        )
+        + "Введите цену за <b>100 ⭐</b> в TON (одно число), например <code>0.751</code>:",
         reply_markup=admin_price_back_kb(),
         parse_mode="HTML",
     )
     await callback.answer()
 
-
-@router.message(PriceStates.entering_usd_per_star, F.text)
-async def admin_price_save(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):
-    """Сохранить новый курс Stars из админки."""
+@router.message(PriceStates.entering_ton_per_100stars, F.text)
+async def admin_price_save_ton(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Сохранить введённую цену за 100 ⭐ в TON и попросить маржу."""
     if not _is_admin(message.from_user.id, config):
         return
     text = (message.text or "").strip().replace(",", ".")
     try:
-        value = float(text)
+        ton_per_100stars = float(text)
     except ValueError:
-        await message.answer("Введите число, например 0.0175")
+        await message.answer("Введите число, например 0.751")
         return
-    if value < 0.001 or value > 1.0:
-        await message.answer("Курс должен быть от 0.001 до 1.0 $ за звезду.")
+    if ton_per_100stars <= 0:
+        await message.answer("Цена должна быть больше 0.")
         return
-    await set_usd_per_star(session, value)
+    await state.update_data(ton_per_100stars=ton_per_100stars)
+    await state.set_state(PriceStates.entering_margin_percent)
+    await message.answer("Введите маржу в % (например 10):")
+
+
+@router.message(PriceStates.entering_margin_percent, F.text)
+async def admin_price_save_margin(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):
+    """Сохранить маржу и применить новую цену."""
+    if not _is_admin(message.from_user.id, config):
+        return
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        margin_percent = float(text)
+    except ValueError:
+        await message.answer("Введите число, например 10")
+        return
+    if margin_percent < 0 or margin_percent > 500:
+        await message.answer("Маржа должна быть в диапазоне 0..500%.")
+        return
+
+    data = await state.get_data()
+    ton_per_100stars = data.get("ton_per_100stars")
+    if not ton_per_100stars or float(ton_per_100stars) <= 0:
+        await message.answer("Сначала задайте цену за 100 ⭐.")
+        return
+
+    ton_per_100stars = float(ton_per_100stars)
+    await set_ton_per_100stars(session, ton_per_100stars)
+    await set_margin_percent(session, margin_percent)
     await session.commit()
-    await _log_admin(session, message.from_user.id, "price_change", f"usd_per_star={value}")
+    await _log_admin(
+        session,
+        message.from_user.id,
+        "price_change",
+        f"ton_per_100stars={ton_per_100stars}, margin_percent={margin_percent}",
+    )
+
     await state.clear()
-    await message.answer(f"✅ Курс обновлён: 1 ⭐ = {value:.4f}$")
+
+    # Пытаемся посчитать USD/₽ для удобства админа
+    usd_per_star = None
+    rub_per_star = None
+    ton_per_star_with_margin = ton_per_100stars / 100.0 * (1.0 + margin_percent / 100.0)
+    try:
+        from bot.services.price_engine import PriceEngine
+        engine = PriceEngine(config.price)
+        ton_usd = await engine.get_ton_usd()
+        if ton_usd and ton_usd > 0:
+            usd_per_star = ton_per_star_with_margin * ton_usd
+            rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
+    except Exception:
+        pass
+
+    if usd_per_star is not None and rub_per_star is not None:
+        await message.answer(
+            f"✅ Цена обновлена.\n"
+            f"100 ⭐ = {ton_per_100stars:.6f} TON\n"
+            f"Маржа: {margin_percent:.2f}%\n\n"
+            f"Итого 1 ⭐: {ton_per_star_with_margin:.6f} TON / {usd_per_star:.4f}$ / {rub_per_star:.0f} ₽"
+        )
+    else:
+        await message.answer(
+            f"✅ Цена обновлена.\n"
+            f"100 ⭐ = {ton_per_100stars:.6f} TON\n"
+            f"Маржа: {margin_percent:.2f}%\n\n"
+            f"Итого 1 ⭐: {ton_per_star_with_margin:.6f} TON (USD/₽ временно не посчитаны — нет курса TON/USD)"
+        )
 
 
 @router.callback_query(F.data == "admin:broadcast")

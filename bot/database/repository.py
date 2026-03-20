@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User, Order, Referral, AppSettings
 from bot.utils.helpers import generate_referral_code
-
-SETTING_USD_PER_STAR = "usd_per_star"
+SETTING_TON_PER_100STARS = "ton_per_100stars"
+SETTING_MARGIN_PERCENT = "margin_percent"
 
 
 async def get_or_create_user(
@@ -68,9 +68,26 @@ async def set_setting(session: AsyncSession, key: str, value: str) -> None:
         session.add(AppSettings(key=key, value=value))
 
 
-async def get_usd_per_star(session: AsyncSession, default: float) -> float:
-    """Возвращает курс 1 Star = X USD из БД или default из конфига."""
-    raw = await get_setting(session, SETTING_USD_PER_STAR)
+async def get_ton_per_100stars(session: AsyncSession, default: float | None = None) -> float | None:
+    """Возвращает цену: сколько TON стоит 100 ⭐ (из БД) или default."""
+    raw = await get_setting(session, SETTING_TON_PER_100STARS)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+        return val
+    except (ValueError, TypeError):
+        return default
+
+
+async def set_ton_per_100stars(session: AsyncSession, value: float) -> None:
+    """Сохраняет цену: сколько TON стоит 100 ⭐ в БД."""
+    await set_setting(session, SETTING_TON_PER_100STARS, str(value))
+
+
+async def get_margin_percent(session: AsyncSession, default: float = 0.0) -> float:
+    """Возвращает маржу в процентах (из БД) или default."""
+    raw = await get_setting(session, SETTING_MARGIN_PERCENT)
     if raw is None:
         return default
     try:
@@ -79,6 +96,6 @@ async def get_usd_per_star(session: AsyncSession, default: float) -> float:
         return default
 
 
-async def set_usd_per_star(session: AsyncSession, value: float) -> None:
-    """Сохраняет курс 1 Star = X USD в БД (для админки)."""
-    await set_setting(session, SETTING_USD_PER_STAR, str(value))
+async def set_margin_percent(session: AsyncSession, value: float) -> None:
+    """Сохраняет маржу в процентах (из БД)."""
+    await set_setting(session, SETTING_MARGIN_PERCENT, str(value))

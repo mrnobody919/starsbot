@@ -9,7 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User, Order
-from bot.database.repository import get_or_create_user as get_user, get_usd_per_star
+from bot.database.repository import (
+    get_or_create_user as get_user,
+    get_ton_per_100stars,
+    get_margin_percent,
+)
 from bot.keyboards import back_to_menu_kb
 from bot.keyboards.buy import (
     recipient_choice_kb,
@@ -154,8 +158,28 @@ async def process_amount(
         await message.answer(f"❌ {err}\nВведите число от 50 до 50 000:")
         return
 
-    usd_per_star = await get_usd_per_star(session, config.price.usd_per_star)
     engine = _get_price_engine(config)
+    ton_per_100stars = await get_ton_per_100stars(session, default=None)
+    margin_percent = await get_margin_percent(session, default=0.0)
+
+    # Расчёт цены:
+    # админ задаёт 100 ⭐ в TON -> получаем 1 ⭐ в TON -> переводим в $ (TON/USD) -> в ₽ и применяем маржу.
+    if not ton_per_100stars or ton_per_100stars <= 0:
+        await message.answer(
+            "❌ Цена Stars ещё не настроена администратором.\n"
+            "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
+            reply_markup=back_to_menu_kb(),
+        )
+        return
+
+    ton_usd = await engine.get_ton_usd()
+    # Если курс TON/USD не удалось обновить, price_engine вернёт fallback
+    if not ton_usd or ton_usd <= 0:
+        ton_usd = 1.33
+
+    ton_per_star_base = ton_per_100stars / 100.0
+    ton_per_star_with_margin = ton_per_star_base * (1.0 + margin_percent / 100.0)
+    usd_per_star = ton_per_star_with_margin * ton_usd
     quote = await engine.quote(value, usd_per_star_override=usd_per_star)
     await state.update_data(stars=value, quote_usd=quote.amount_usd, quote_ton=quote.amount_ton)
 
@@ -175,8 +199,9 @@ async def process_amount(
         await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
         total_rub = round(quote.amount_usd * rub_per_usd)
+        ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
         text = (
-            f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub} ₽)\n\n"
+            f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub} ₽){ton_part}\n\n"
             f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub} ₽) на балансе\n\n"
             f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub} ₽)\n\n"
             "👇🏻 Выберите способ оплаты из предложенных: 👇🏻\n\n"
@@ -191,12 +216,16 @@ async def process_amount(
         return
 
     await state.set_state(BuyStates.choosing_payment)
+    rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
+    total_rub = round(quote.amount_usd * rub_per_usd)
+    ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
     text = (
         f"⭐ <b>{format_stars(value)}</b>\n\n"
-        f"Стоимость: {format_price(quote.amount_usd)}"
+        f"Стоимость: {format_price(quote.amount_usd)} ({total_rub} ₽){ton_part}"
     )
     if quote.amount_ton:
-        text += f" (~ {quote.amount_ton} TON)"
+        # уже добавлено выше в ton_part
+        pass
     text += f"\n\n💰 На балансе: {balance_usd:.2f}$\n\nВыберите способ оплаты:"
 
     await message.answer(

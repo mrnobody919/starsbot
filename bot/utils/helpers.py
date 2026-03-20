@@ -67,11 +67,21 @@ async def edit_or_send_text(callback, text: str, reply_markup, parse_mode: Optio
     kwargs = {"reply_markup": reply_markup}
     if parse_mode is not None:
         kwargs["parse_mode"] = parse_mode
+    msg = getattr(callback, "message", None)
+    if msg is None:
+        # На всякий случай: если callback без message (редко), отправим в чат пользователя.
+        await callback.bot.send_message(chat_id=callback.from_user.id, text=text, **kwargs)
+        return
+
+    # В некоторых случаях в aiogram для устаревших/удалённых сообщений callback.message может быть
+    # объектом InaccessibleMessage, у которого нет поля photo/edit_text и т.п.
     try:
-        if callback.message.photo:
-            await callback.message.delete()
-            await callback.message.answer(text, **kwargs)
+        has_photo = bool(getattr(msg, "photo", None))
+        if has_photo:
+            await msg.delete()
+            await msg.answer(text, **kwargs)
         else:
-            await callback.message.edit_text(text, **kwargs)
-    except TelegramBadRequest:
-        await callback.message.answer(text, **kwargs)
+            await msg.edit_text(text, **kwargs)
+    except (TelegramBadRequest, AttributeError):
+        # fallback: просто отправим новое сообщение пользователю вместо редактирования.
+        await callback.bot.send_message(chat_id=callback.from_user.id, text=text, **kwargs)

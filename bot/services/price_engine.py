@@ -90,24 +90,19 @@ class PriceEngine:
             if ton_usd_rate <= 1.0:
                 return 1.0 / ton_usd_rate  # 1 TON = 1/0.751 ≈ 1.33 USD
             return ton_usd_rate  # > 1: 1 TON = rate USD
-        ton_per_star = getattr(self.config, "ton_per_star", None)
-        if ton_per_star and ton_per_star > 0:
-            return self.config.usd_per_star / ton_per_star
         async with self._lock:
             if self._ton_usd is not None:
                 return self._ton_usd
         await self.update_ton_rate()
         async with self._lock:
-            return self._ton_usd
+            if self._ton_usd and self._ton_usd > 0:
+                return self._ton_usd
 
-    def stars_to_usd(self, stars: int) -> float:
-        """
-        Переводит количество Stars в USD: 1 Star = usd_per_star USD, с учётом скидок.
-        Курс задаётся в конфиге (USD_PER_STAR, по умолчанию 0.0175).
-        """
-        mult = self._discount_multiplier(stars)
-        base_usd = stars * self.config.usd_per_star
-        return round(base_usd * mult, 2)
+        # Если курс недоступен (например, провайдер блокирует запросы),
+        # возвращаем консервативный фиксированный fallback, чтобы бот не зависал.
+        fallback = 1.33  # USD за 1 TON (примерно соответствует ~0.751 TON за 1$)
+        logger.warning("TON/USD недоступен — используется fallback=%s", fallback)
+        return fallback
 
     def stars_to_usd_with_rate(self, stars: int, usd_per_star: float) -> float:
         """Считает USD за stars по заданному курсу (с учётом скидок)."""
@@ -119,10 +114,9 @@ class PriceEngine:
         Возвращает цену за указанное количество Stars в USD и TON.
         usd_per_star_override: курс из админки (1 Star = X USD); если None — из конфига.
         """
-        if usd_per_star_override is not None and usd_per_star_override > 0:
-            amount_usd = self.stars_to_usd_with_rate(stars, usd_per_star_override)
-        else:
-            amount_usd = self.stars_to_usd(stars)
+        if usd_per_star_override is None or usd_per_star_override <= 0:
+            raise ValueError("usd_per_star_override обязателен (и должен быть > 0) для расчёта цены.")
+        amount_usd = self.stars_to_usd_with_rate(stars, usd_per_star_override)
         amount_ton: Optional[float] = None
         ton_usd = await self.get_ton_usd()
         if ton_usd and ton_usd > 0:

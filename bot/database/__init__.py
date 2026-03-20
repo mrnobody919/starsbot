@@ -1,6 +1,6 @@
 from .db import create_engine, ensure_balance_usd_column, get_session, init_db
 from .models import Base, User, Order, Transaction, Referral, AdminLog, AppSettings
-from .repository import get_or_create_user, get_usd_per_star, set_usd_per_star
+from .repository import get_or_create_user
 
 __all__ = [
     "create_engine",
@@ -8,8 +8,6 @@ __all__ = [
     "get_session",
     "init_db",
     "get_or_create_user",
-    "get_usd_per_star",
-    "set_usd_per_star",
     "Base",
     "User",
     "Order",
