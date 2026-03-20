@@ -5,7 +5,7 @@
 from aiogram import Router, Bot, F
 from aiogram.types import Message, PreCheckoutQuery, LabeledPrice
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from bot.database.models import Order, User, Referral, Transaction
 from bot.config import AppConfig
@@ -150,7 +150,15 @@ async def complete_order_payment(
     Помечает заказ оплаченным: списание баланса (balance_used), Transaction,
     реферальные начисления, уведомления.
     """
-    if order.payment_status == "paid":
+    # Идемпотентность: если из-за ретраев/параллельных вызовов функция
+    # будет запущена повторно, то только первый вызов реально переведёт заказ в paid.
+    # Второй вызов должен выйти без повторных уведомлений.
+    res = await session.execute(
+        update(Order)
+        .where(Order.id == order.id, Order.payment_status != "paid")
+        .values(payment_status="paid")
+    )
+    if getattr(res, "rowcount", 0) == 0:
         return
     order.payment_status = "paid"
     session.add(
