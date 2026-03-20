@@ -15,10 +15,43 @@ def recipient_choice_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def premium_recipient_choice_kb() -> InlineKeyboardMarkup:
+    """Выбор: купить Premium себе / подарить другу / назад."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🫵 Купить себе", callback_data="premium:recipient_self"),
+            InlineKeyboardButton(text="👥Подарить другу", callback_data="premium:recipient_gift"),
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="menu:main")],
+    ])
+
+
+def premium_back_to_recipient_kb() -> InlineKeyboardMarkup:
+    """Назад к выбору получателя Premium."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="premium:back_recipient")],
+    ])
+
+
 def back_to_recipient_kb() -> InlineKeyboardMarkup:
     """Назад к выбору получателя (из ввода количества)."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="◀️ Назад", callback_data="buy:back_recipient")],
+    ])
+
+
+def premium_duration_kb(prices: dict[int, float]) -> InlineKeyboardMarkup:
+    """Кнопки выбора срока Premium."""
+    def _btn(months: int) -> InlineKeyboardButton:
+        price = prices.get(months)
+        price_txt = f"${price:.2f}" if price is not None else "—"
+        return InlineKeyboardButton(text=f"{months} месяцев ({price_txt})", callback_data=f"premium:duration:{months}")
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(3)],
+        [_btn(6)],
+        [_btn(12)],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="premium:back_recipient")],
     ])
 
 

@@ -32,6 +32,7 @@ class User(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     balance_stars: Mapped[float] = mapped_column(Float, default=0.0)
     balance_usd: Mapped[float] = mapped_column(Float, default=0.0)  # баланс в USD для покупки Stars
+    premium_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # до какого момента активен Premium
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     referred_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     referral_reward_total: Mapped[float] = mapped_column(Float, default=0.0)
@@ -49,7 +50,7 @@ class User(Base):
 
 
 class Order(Base):
-    """Заказ на покупку Stars."""
+    """Заказ на покупку Stars / Premium."""
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -57,6 +58,8 @@ class Order(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     recipient_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # для подарка: кому отправлять Stars
     stars_amount: Mapped[int] = mapped_column(Integer)
+    order_type: Mapped[str] = mapped_column(String(16), default="stars")  # stars | premium
+    premium_months: Mapped[int] = mapped_column(Integer, default=0)  # для premium: 3/6/12
     price: Mapped[float] = mapped_column(Float)
     payment_method: Mapped[str] = mapped_column(String(32))  # cryptobot, ton, freekassa
     payment_status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, paid

@@ -23,6 +23,18 @@ _ADD_BALANCE_USED_SQL = (
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS balance_used DOUBLE PRECISION DEFAULT 0.0"
 )
 
+_ADD_ORDER_TYPE_SQL = (
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(16) DEFAULT 'stars'"
+)
+
+_ADD_PREMIUM_MONTHS_SQL = (
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS premium_months INTEGER DEFAULT 0"
+)
+
+_ADD_PREMIUM_UNTIL_SQL = (
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TIMESTAMP NULL"
+)
+
 
 def get_async_database_url(sync_url: str) -> str:
     """
@@ -68,6 +80,9 @@ async def init_db(database_url: str) -> async_sessionmaker[AsyncSession]:
                 await conn.execute(text(_ADD_BALANCE_USD_SQL))
                 await conn.execute(text(_ADD_RECIPIENT_USERNAME_SQL))
                 await conn.execute(text(_ADD_BALANCE_USED_SQL))
+                await conn.execute(text(_ADD_ORDER_TYPE_SQL))
+                await conn.execute(text(_ADD_PREMIUM_MONTHS_SQL))
+                await conn.execute(text(_ADD_PREMIUM_UNTIL_SQL))
             break
         except Exception as e:
             last_error = e

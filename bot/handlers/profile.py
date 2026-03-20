@@ -131,9 +131,16 @@ async def order_view(callback: CallbackQuery, session: AsyncSession):
 
     status_emoji = "✅" if order.delivery_status == "completed" else "⏳"
     pay_emoji = "✅" if order.payment_status == "paid" else "⏳"
+    order_type = (getattr(order, "order_type", None) or "stars").lower()
+    if order_type == "premium":
+        months = getattr(order, "premium_months", 0) or 0
+        product_line = f"👑 Premium: {months} месяцев"
+    else:
+        product_line = f"⭐ Stars: {order.stars_amount}"
+
     text = (
         f"{status_emoji} Заказ #{order.id}\n\n"
-        f"⭐ Stars: {order.stars_amount}\n"
+        f"{product_line}\n"
         f"💵 Сумма: {order.price} {order.payment_method}\n"
         f"Оплата: {pay_emoji} {'Оплачен' if order.payment_status == 'paid' else 'Ожидание'}\n"
         f"Доставка: {status_emoji} {'Выполнен' if order.delivery_status == 'completed' else 'Ожидание'}\n"

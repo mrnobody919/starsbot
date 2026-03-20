@@ -21,7 +21,7 @@ from aiogram.enums import ParseMode
 from bot.config import load_config
 from bot.database import init_db, ensure_balance_usd_column
 from bot.middlewares import AntifloodMiddleware, DbSessionMiddleware
-from bot.handlers import start, buy_stars, payments, profile, referrals, admin
+from bot.handlers import start, buy_stars, premium, payments, profile, referrals, admin
 from bot.services.price_engine import PriceEngine
 from bot.services.payment_checker import PaymentChecker
 from bot.services.cryptobot_service import CryptoBotService
@@ -93,6 +93,7 @@ async def main():
     # Роутеры
     dp.include_router(start.router)
     dp.include_router(buy_stars.router)
+    dp.include_router(premium.router)
     dp.include_router(profile.router)
     dp.include_router(referrals.router)
     dp.include_router(payments.router)

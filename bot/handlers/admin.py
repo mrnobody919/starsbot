@@ -2,6 +2,7 @@
 Админ-панель: заказы, статистика, пользователи, рассылка, блокировки.
 """
 from datetime import datetime, timedelta
+import calendar
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, FSInputFile
 from aiogram.fsm.context import FSMContext
@@ -15,6 +16,8 @@ from bot.database.repository import (
     set_margin_percent,
     get_ton_per_100stars,
     set_ton_per_100stars,
+    get_premium_prices_usd,
+    set_premium_price_usd,
 )
 from bot.keyboards import (
     admin_main_kb,
@@ -44,6 +47,12 @@ class BroadcastStates(StatesGroup):
 class PriceStates(StatesGroup):
     entering_ton_per_100stars = State()
     entering_margin_percent = State()
+
+
+class PremiumPriceStates(StatesGroup):
+    entering_3m = State()
+    entering_6m = State()
+    entering_12m = State()
 
 
 async def _log_admin(session: AsyncSession, admin_id: int, action: str, details: str | None = None):
@@ -93,7 +102,11 @@ async def admin_orders_list(callback: CallbackQuery, session: AsyncSession, conf
     lines = ["📋 Оплаченные заказы (ожидают отправки):\n"]
     for o in orders[:15]:
         if o.delivery_status == "waiting":
-            lines.append(f"⏳ #{o.id} | {o.stars_amount} ⭐ | user_id={o.user_id} | {format_datetime(o.created_at)}")
+            order_type = (getattr(o, "order_type", None) or "stars").lower()
+            if order_type == "premium":
+                lines.append(f"⏳ #{o.id} | Premium {getattr(o, 'premium_months', 0) or 0} мес | user_id={o.user_id} | {format_datetime(o.created_at)}")
+            else:
+                lines.append(f"⏳ #{o.id} | {o.stars_amount} ⭐ | user_id={o.user_id} | {format_datetime(o.created_at)}")
     if not lines[1:]:
         lines.append("Нет заказов в ожидании.")
     await callback.message.edit_text(
@@ -125,7 +138,11 @@ async def admin_orders_filter(callback: CallbackQuery, session: AsyncSession, co
     lines = ["📋 Заказы:\n"]
     for o in orders[:20]:
         status = "✅" if o.delivery_status == "completed" else "⏳"
-        lines.append(f"{status} #{o.id} | {o.stars_amount} ⭐ | user_id={o.user_id}")
+        order_type = (getattr(o, "order_type", None) or "stars").lower()
+        if order_type == "premium":
+            lines.append(f"{status} #{o.id} | Premium {getattr(o, 'premium_months', 0) or 0} мес | user_id={o.user_id}")
+        else:
+            lines.append(f"{status} #{o.id} | {o.stars_amount} ⭐ | user_id={o.user_id}")
     await callback.message.edit_text("\n".join(lines) if lines[1:] else "Нет заказов.", reply_markup=admin_orders_filter_kb())
     await callback.answer()
 
@@ -155,7 +172,38 @@ async def admin_order_complete(
     await _log_admin(session, callback.from_user.id, "order_complete", f"order_id={order_id}")
     await session.flush()
     if user:
-        await _notify_user_order_completed(callback.bot, user.telegram_id, order.id, order.stars_amount)
+        # Если это Premium-заказ — активируем подписку получателю в БД.
+        try:
+            order_type = (getattr(order, "order_type", None) or "stars").lower()
+            if order_type == "premium":
+                months = getattr(order, "premium_months", None) or 0
+                if months > 0:
+                    now = datetime.utcnow()
+
+                    # Для подарка ищем получателя по username.
+                    target_user = user
+                    recipient_username = getattr(order, "recipient_username", None)
+                    if recipient_username:
+                        recipient = await session.execute(
+                            select(User).where(User.username == recipient_username)
+                        )
+                        target_user = recipient.scalar_one_or_none() or user
+
+                    current_until = getattr(target_user, "premium_until", None)
+                    base = current_until if current_until and current_until > now else now
+
+                    # Добавляем месяцы без внешних зависимостей.
+                    month_idx = base.month - 1 + int(months)
+                    year = base.year + month_idx // 12
+                    month = month_idx % 12 + 1
+                    day = min(base.day, calendar.monthrange(year, month)[1])
+                    target_user.premium_until = base.replace(year=year, month=month, day=day)
+                    session.add(target_user)
+                    await session.flush()
+        except Exception as e:
+            logger.warning("Premium activation failed for order %s: %s", order.id, e)
+
+        await _notify_user_order_completed(callback.bot, user.telegram_id, order)
     await callback.answer("Заказ отмечен выполненным.")
     # Под сообщением «Оплачен заказ» (админ/канал) убираем кнопку; в админ-панели — меняем на действия по заказу
     text = callback.message.text or callback.message.caption or ""
@@ -164,9 +212,9 @@ async def admin_order_complete(
             from aiogram.types import InlineKeyboardMarkup
             await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[]))
         except Exception:
-            await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
+            await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id, getattr(order, "order_type", "stars")))
     else:
-        await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
+        await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id, getattr(order, "order_type", "stars")))
 
 
 @router.callback_query(F.data.startswith("admin:order:cancel:"))
@@ -191,7 +239,7 @@ async def admin_order_cancel(
     order.delivery_status = "cancelled"
     await _log_admin(session, callback.from_user.id, "order_cancel", f"order_id={order_id}")
     await callback.answer("Заказ отменён.")
-    await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id))
+    await callback.message.edit_reply_markup(reply_markup=admin_order_actions_kb(order_id, getattr(order, "order_type", "stars")))
 
 
 @router.callback_query(F.data == "admin:stats")
@@ -385,6 +433,123 @@ async def admin_price_show(callback: CallbackQuery, state: FSMContext, session: 
         parse_mode="HTML",
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin:premium:price")
+async def admin_premium_price_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    config: AppConfig,
+):
+    """Ввод цен Premium в USD."""
+    if not _is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await state.clear()
+    await state.set_state(PremiumPriceStates.entering_3m)
+    await callback.message.edit_text(
+        "👑 <b>Premium цены</b>\n\n"
+        "Введите цену за <b>3 месяца</b> в <b>$</b> (одно число, например <code>5</code>):",
+        reply_markup=admin_price_back_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(PremiumPriceStates.entering_3m, F.text)
+async def admin_premium_price_save_3m(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    config: AppConfig,
+):
+    if not _is_admin(message.from_user.id, config):
+        return
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        value = float(text)
+    except ValueError:
+        await message.answer("Введите число, например 5")
+        return
+    if value <= 0:
+        await message.answer("Цена должна быть больше 0.")
+        return
+    await state.update_data(premium_3m=value)
+    await state.set_state(PremiumPriceStates.entering_6m)
+    await message.answer("Введите цену за <b>6 месяцев</b> в <b>$</b>:", parse_mode="HTML")
+
+
+@router.message(PremiumPriceStates.entering_6m, F.text)
+async def admin_premium_price_save_6m(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    config: AppConfig,
+):
+    if not _is_admin(message.from_user.id, config):
+        return
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        value = float(text)
+    except ValueError:
+        await message.answer("Введите число, например 10")
+        return
+    if value <= 0:
+        await message.answer("Цена должна быть больше 0.")
+        return
+    await state.update_data(premium_6m=value)
+    await state.set_state(PremiumPriceStates.entering_12m)
+    await message.answer("Введите цену за <b>12 месяцев</b> в <b>$</b>:", parse_mode="HTML")
+
+
+@router.message(PremiumPriceStates.entering_12m, F.text)
+async def admin_premium_price_save_12m(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    config: AppConfig,
+):
+    if not _is_admin(message.from_user.id, config):
+        return
+    text = (message.text or "").strip().replace(",", ".")
+    try:
+        value = float(text)
+    except ValueError:
+        await message.answer("Введите число, например 20")
+        return
+    if value <= 0:
+        await message.answer("Цена должна быть больше 0.")
+        return
+
+    data = await state.get_data()
+    premium_3m = float(data.get("premium_3m") or 0)
+    premium_6m = float(data.get("premium_6m") or 0)
+    if premium_3m <= 0 or premium_6m <= 0:
+        await message.answer("Сессия цен невалидна. Начните заново.")
+        await state.clear()
+        return
+
+    await set_premium_price_usd(session, 3, premium_3m)
+    await set_premium_price_usd(session, 6, premium_6m)
+    await set_premium_price_usd(session, 12, value)
+    await session.commit()
+    await _log_admin(
+        session,
+        message.from_user.id,
+        "premium_price_change",
+        f"3m={premium_3m},6m={premium_6m},12m={value}",
+    )
+    await state.clear()
+
+    prices = await get_premium_prices_usd(session)
+    await message.answer(
+        f"✅ Premium цены обновлены:\n"
+        f"3 мес: ${prices.get(3, 0):.2f}\n"
+        f"6 мес: ${prices.get(6, 0):.2f}\n"
+        f"12 мес: ${prices.get(12, 0):.2f}",
+        reply_markup=admin_main_kb(),
+    )
 
 @router.message(PriceStates.entering_ton_per_100stars, F.text)
 async def admin_price_save_ton(message: Message, state: FSMContext, session: AsyncSession, config: AppConfig):

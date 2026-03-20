@@ -16,13 +16,18 @@ router = Router(name="payments")
 logger = get_logger(__name__)
 
 
-async def _notify_user_order_paid(bot: Bot, telegram_id: int, order_id: int, stars: int):
-    """Уведомление пользователю: заказ оплачен, ожидайте отправки."""
+async def _notify_user_order_paid(bot: Bot, telegram_id: int, order: Order):
+    """Уведомление пользователю: заказ оплачен."""
     try:
-        await bot.send_message(
-            telegram_id,
-            f"✅ Ваш заказ #{order_id} оплачен. Ожидайте отправки Stars ({format_stars(stars)}).",
-        )
+        order_type = (getattr(order, "order_type", None) or "stars").lower()
+        if order_type == "premium":
+            months = getattr(order, "premium_months", 0) or 0
+            text = f"✅ Ваш заказ #{order.id} оплачен. Ожидайте активации Premium ({months} месяцев)."
+        else:
+            stars = getattr(order, "stars_amount", 0) or 0
+            text = f"✅ Ваш заказ #{order.id} оплачен. Ожидайте отправки Stars ({format_stars(stars)})."
+
+        await bot.send_message(telegram_id, text)
     except Exception as e:
         logger.warning("Notify user %s failed: %s", telegram_id, e)
 
@@ -40,27 +45,50 @@ async def send_payment_received_message(
         logger.warning("Send payment received to %s failed: %s", telegram_id, e)
 
 
-async def _notify_user_order_completed(bot: Bot, telegram_id: int, order_id: int, stars: int):
-    """Уведомление пользователю: заказ выполнен, Stars отправлены."""
+async def _notify_user_order_completed(bot: Bot, telegram_id: int, order: Order):
+    """Уведомление пользователю: заказ выполнен."""
     try:
+        order_type = (getattr(order, "order_type", None) or "stars").lower()
+        if order_type == "premium":
+            months = getattr(order, "premium_months", 0) or 0
+            text = f"✅ Ваш заказ #{order.id} выполнен. Premium на {months} месяцев активирована."
+        else:
+            stars = getattr(order, "stars_amount", 0) or 0
+            text = f"✅ Ваш заказ #{order.id} выполнен. Вам отправлено {format_stars(stars)}."
         await bot.send_message(
             telegram_id,
-            f"✅ Ваш заказ #{order_id} выполнен. Вам отправлено {format_stars(stars)}.",
+            text,
         )
     except Exception as e:
         logger.warning("Notify user %s failed: %s", telegram_id, e)
 
 
 async def _notify_admins_new_order(bot: Bot, admin_ids: list[int], order: Order, user: User):
-    """Уведомление админам: новый оплаченный заказ и кнопка «Stars отправлены»."""
-    from bot.keyboards import order_stars_sent_kb
-    text = (
-        f"🆕 Оплачен заказ #{order.id}\n"
-        f"👤 User: {user.telegram_id} (@{user.username or '—'})\n"
-        f"⭐ Stars: {order.stars_amount}\n"
-        f"💵 Сумма: {order.price} $ ({order.payment_method})"
-    )
-    reply_markup = order_stars_sent_kb(order.id)
+    """Уведомление админам: новый оплаченный заказ."""
+    order_type = (getattr(order, "order_type", None) or "stars").lower()
+    if order_type == "premium":
+        from bot.keyboards import order_premium_sent_kb
+        months = getattr(order, "premium_months", 0) or 0
+        recipient_username = getattr(order, "recipient_username", None)
+        recipient = f"@{recipient_username}" if recipient_username else "себе"
+        text = (
+            f"🆕 Оплачен Premium заказ #{order.id}\n"
+            f"👤 Покупатель: {user.telegram_id} (@{user.username or '—'})\n"
+            f"🎁 Получатель: {recipient}\n"
+            f"🗓️ Срок: {months} месяцев\n"
+            f"💵 Сумма: {order.price} $ ({order.payment_method})"
+        )
+        reply_markup = order_premium_sent_kb(order.id)
+    else:
+        from bot.keyboards import order_stars_sent_kb
+        text = (
+            f"🆕 Оплачен заказ #{order.id}\n"
+            f"👤 User: {user.telegram_id} (@{user.username or '—'})\n"
+            f"⭐ Stars: {order.stars_amount}\n"
+            f"💵 Сумма: {order.price} $ ({order.payment_method})"
+        )
+        reply_markup = order_stars_sent_kb(order.id)
+
     for aid in admin_ids:
         try:
             await bot.send_message(aid, text, reply_markup=reply_markup)
@@ -69,22 +97,39 @@ async def _notify_admins_new_order(bot: Bot, admin_ids: list[int], order: Order,
 
 
 async def _send_order_to_channel(bot: Bot, channel_id: int, order: Order, user: User):
-    """Отправка оплаченного заказа в канал/группу с кнопкой «Stars отправлены»."""
-    from bot.keyboards import order_stars_sent_kb
-    recipient = getattr(order, "recipient_username", None) or "себе"
-    if recipient and recipient != "себе" and not recipient.startswith("@"):
-        recipient = f"@{recipient}"
-    text = (
-        f"🆕 <b>Оплачен заказ #{order.id}</b>\n\n"
-        f"👤 Покупатель: <code>{user.telegram_id}</code> (@{user.username or '—'})\n"
-        f"📤 Получатель Stars: {recipient}\n"
-        f"⭐ Количество: {order.stars_amount}\n"
-        f"💵 Сумма: {order.price} $ ({order.payment_method})\n\n"
-        f"⏳ Ожидает отправки."
-    )
+    """Отправка оплаченного заказа в канал/группу."""
+    order_type = (getattr(order, "order_type", None) or "stars").lower()
+    from bot.keyboards import order_stars_sent_kb, order_premium_sent_kb
+    if order_type == "premium":
+        recipient_username = getattr(order, "recipient_username", None)
+        recipient = f"@{recipient_username}" if recipient_username else "себе"
+        months = getattr(order, "premium_months", 0) or 0
+        text = (
+            f"🆕 <b>Оплачен Premium заказ #{order.id}</b>\n\n"
+            f"👤 Покупатель: <code>{user.telegram_id}</code> (@{user.username or '—'})\n"
+            f"📤 Получатель Premium: {recipient}\n"
+            f"🗓️ Срок: {months} месяцев\n"
+            f"💵 Сумма: {order.price} $ ({order.payment_method})\n\n"
+            f"⏳ Ожидает активации."
+        )
+    else:
+        recipient = getattr(order, "recipient_username", None) or "себе"
+        if recipient and recipient != "себе" and not recipient.startswith("@"):
+            recipient = f"@{recipient}"
+        text = (
+            f"🆕 <b>Оплачен заказ #{order.id}</b>\n\n"
+            f"👤 Покупатель: <code>{user.telegram_id}</code> (@{user.username or '—'})\n"
+            f"📤 Получатель Stars: {recipient}\n"
+            f"⭐ Количество: {order.stars_amount}\n"
+            f"💵 Сумма: {order.price} $ ({order.payment_method})\n\n"
+            f"⏳ Ожидает отправки."
+        )
     try:
         await bot.send_message(
-            channel_id, text, parse_mode="HTML", reply_markup=order_stars_sent_kb(order.id)
+            channel_id,
+            text,
+            parse_mode="HTML",
+            reply_markup=(order_premium_sent_kb(order.id) if order_type == "premium" else order_stars_sent_kb(order.id)),
         )
     except Exception as e:
         logger.warning("Send order to channel %s failed: %s", channel_id, e)
@@ -133,7 +178,7 @@ async def complete_order_payment(
                     )
                 )
         await session.flush()
-        await _notify_user_order_paid(bot, user.telegram_id, order.id, order.stars_amount)
+        await _notify_user_order_paid(bot, user.telegram_id, order)
         if config.admin_ids:
             await _notify_admins_new_order(bot, config.admin_ids, order, user)
         if config.orders_channel_id:
@@ -180,7 +225,7 @@ async def successful_payment(message: Message, session: AsyncSession, config: Ap
     if order.payment_status == "paid":
         user = await session.get(User, order.user_id)
         if user:
-            await _notify_user_order_paid(message.bot, user.telegram_id, order.id, order.stars_amount)
+            await _notify_user_order_paid(message.bot, user.telegram_id, order)
         return
 
     await complete_order_payment(session, message.bot, config, order)

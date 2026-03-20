@@ -110,7 +110,6 @@ async def menu_main(callback: CallbackQuery, session: AsyncSession, config: AppC
 
 
 @router.callback_query(F.data == "menu:sell")
-@router.callback_query(F.data == "menu:premium")
 async def menu_coming_soon(callback: CallbackQuery):
     """Продать звёзды / Premium — функция в разработке."""
     await edit_or_send_text(

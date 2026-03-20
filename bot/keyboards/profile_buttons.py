@@ -21,9 +21,14 @@ def orders_list_kb(orders: list, page: int = 0, per_page: int = 5) -> InlineKeyb
     buttons = []
     for o in chunk:
         status_emoji = "✅" if o.delivery_status == "completed" else "⏳"
+        order_type = (getattr(o, "order_type", None) or "stars").lower()
         buttons.append([
             InlineKeyboardButton(
-                text=f"{status_emoji} #{o.id} — {o.stars_amount} ⭐",
+                text=(
+                    f"{status_emoji} #{o.id} — Premium {getattr(o, 'premium_months', 0) or 0}м"
+                    if order_type == "premium"
+                    else f"{status_emoji} #{o.id} — {o.stars_amount} ⭐"
+                ),
                 callback_data=f"order:view:{o.id}"
             )
         ])
