@@ -9,6 +9,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import StateFilter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -849,11 +850,11 @@ async def premium_topup_sbp(callback: CallbackQuery, state: FSMContext, session:
     await callback.answer()
 
 
-@router.callback_query(F.data == "menu:main", state=PremiumStates.choosing_recipient)
-@router.callback_query(F.data == "menu:main", state=PremiumStates.entering_recipient_username)
-@router.callback_query(F.data == "menu:main", state=PremiumStates.choosing_duration)
-@router.callback_query(F.data == "menu:main", state=PremiumStates.choosing_payment)
-@router.callback_query(F.data == "menu:main", state=PremiumStates.confirmed)
+@router.callback_query(F.data == "menu:main", StateFilter(PremiumStates.choosing_recipient))
+@router.callback_query(F.data == "menu:main", StateFilter(PremiumStates.entering_recipient_username))
+@router.callback_query(F.data == "menu:main", StateFilter(PremiumStates.choosing_duration))
+@router.callback_query(F.data == "menu:main", StateFilter(PremiumStates.choosing_payment))
+@router.callback_query(F.data == "menu:main", StateFilter(PremiumStates.confirmed))
 async def premium_back_to_menu(callback: CallbackQuery, state: FSMContext, config: AppConfig):
     """Возврат в меню из сценария Premium."""
     await state.clear()
