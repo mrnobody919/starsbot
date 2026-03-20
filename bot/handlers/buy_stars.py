@@ -193,12 +193,19 @@ async def process_amount(
         await session.flush()
 
     rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
+    ton_rub = await engine.get_ton_rub()
     if balance_usd < quote.amount_usd:
         shortage = quote.amount_usd - balance_usd
-        shortage_rub = round(shortage * rub_per_usd)
+        if ton_rub and quote.amount_ton:
+            shortage_rub = round((shortage / max(ton_usd, 1e-9)) * ton_rub)
+        else:
+            shortage_rub = round(shortage * rub_per_usd)
         await state.update_data(shortage_usd=shortage)
         await state.set_state(BuyStates.choosing_payment)
-        total_rub = round(quote.amount_usd * rub_per_usd)
+        if ton_rub and quote.amount_ton:
+            total_rub = round(quote.amount_ton * ton_rub)
+        else:
+            total_rub = round(quote.amount_usd * rub_per_usd)
         ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
         text = (
             f"⭐ {format_stars(value)} — стоимость заказа: {quote.amount_usd:.2f}$ ({total_rub} ₽){ton_part}\n\n"
@@ -217,7 +224,10 @@ async def process_amount(
 
     await state.set_state(BuyStates.choosing_payment)
     rub_per_usd = getattr(config, "rub_per_usd", 100) or 100
-    total_rub = round(quote.amount_usd * rub_per_usd)
+    if ton_rub and quote.amount_ton:
+        total_rub = round(quote.amount_ton * ton_rub)
+    else:
+        total_rub = round(quote.amount_usd * rub_per_usd)
     ton_part = f" (~ {quote.amount_ton} TON)" if quote.amount_ton else ""
     text = (
         f"⭐ <b>{format_stars(value)}</b>\n\n"

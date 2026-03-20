@@ -97,7 +97,9 @@ class PriceConfig:
     Цена в USD всегда вычисляется из TON и курса, а не задаётся вручную как "USD per star".
     """
     ton_usd_rate: Optional[float] = None  # 1 TON = N USD (например 1.33) или 0.751 (1 USD = 0.751 TON)
-    ton_usd_url: str = "https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT"  # курс 1 TON в USD (Binance), без ключа
+    # CoinGecko возвращает сразу два значения: TON в USD и TON в RUB.
+    # Формат ответа: { "the-open-network": { "usd": 1.33, "rub": 104.78 } }
+    ton_usd_url: str = "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd,rub"
     update_interval_seconds: int = 600  # 10 минут — автообновление курса TON/USD (если не задан фиксированный курс)
     # Скидки: (мин. сумма заказа в Stars, множитель цены 0.0-1.0)
     discount_tiers: tuple = ((1000, 0.98), (5000, 0.95), (10000, 0.92))
@@ -106,11 +108,14 @@ class PriceConfig:
     def from_env(cls) -> "PriceConfig":
         ton_usd_str = os.getenv("TON_USD_RATE", "").strip()
         ton_usd_rate = float(ton_usd_str) if ton_usd_str else None
-        ton_usd_url = os.getenv("TON_USD_URL", "").strip() or "https://api.binance.com/api/v3/ticker/price?symbol=TONUSDT"
+        ton_usd_url = os.getenv("TON_USD_URL", "").strip() or "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd,rub"
+        # Даже если в Railway указали 300 — не будем обновлять чаще, чтобы не ловить 429.
+        update_interval = int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
+        update_interval_seconds = max(600, update_interval)
         return cls(
             ton_usd_rate=ton_usd_rate if (ton_usd_rate and ton_usd_rate > 0) else None,
             ton_usd_url=ton_usd_url,
-            update_interval_seconds=int(os.getenv("PRICE_UPDATE_INTERVAL", "600"))
+            update_interval_seconds=update_interval_seconds
         )
 
 

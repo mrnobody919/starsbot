@@ -355,11 +355,15 @@ async def admin_price_show(callback: CallbackQuery, state: FSMContext, session: 
             from bot.services.price_engine import PriceEngine
             engine = PriceEngine(config.price)
             ton_usd = await engine.get_ton_usd()
+            ton_rub = await engine.get_ton_rub()
             if ton_usd and ton_usd > 0:
                 ton_per_star_base = ton_per_100stars / 100.0
                 ton_per_star_with_margin = ton_per_star_base * (1.0 + margin_percent / 100.0)
                 usd_per_star = ton_per_star_with_margin * ton_usd
-                rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
+                if ton_rub and ton_rub > 0:
+                    rub_per_star = ton_per_star_with_margin * ton_rub
+                else:
+                    rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
         except Exception:
             pass
 
@@ -443,9 +447,13 @@ async def admin_price_save_margin(message: Message, state: FSMContext, session: 
         from bot.services.price_engine import PriceEngine
         engine = PriceEngine(config.price)
         ton_usd = await engine.get_ton_usd()
+        ton_rub = await engine.get_ton_rub()
         if ton_usd and ton_usd > 0:
             usd_per_star = ton_per_star_with_margin * ton_usd
-            rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
+            if ton_rub and ton_rub > 0:
+                rub_per_star = ton_per_star_with_margin * ton_rub
+            else:
+                rub_per_star = usd_per_star * (getattr(config, "rub_per_usd", 100) or 100)
     except Exception:
         pass
 

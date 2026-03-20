@@ -31,6 +31,7 @@ class PriceEngine:
     def __init__(self, config: PriceConfig):
         self.config = config
         self._ton_usd: Optional[float] = None
+        self._ton_rub: Optional[float] = None
         self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task] = None
 
@@ -42,39 +43,50 @@ class PriceEngine:
                 mult = tier_mult
         return mult
 
-    async def fetch_ton_usd(self) -> Optional[float]:
+    async def fetch_ton_prices(self) -> tuple[Optional[float], Optional[float]]:
         """
-        Загружает курс TON/USD с настроенного URL.
-        По умолчанию Binance (TONUSDT): {"symbol":"TONUSDT","price":"5.12"} → 5.12 USD за 1 TON.
-        Поддерживается и CoinGecko: {"the-open-network":{"usd":1.33}} — задайте TON_USD_URL в .env.
+        Загружает курс TON к USD и RUB.
+
+        Поддерживаются:
+        - CoinGecko: { "the-open-network": { "usd": 1.33, "rub": 104.78 } }
+        - Binance: { "price": "5.12" } (тогда RUB не возвращается)
         """
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(self.config.ton_usd_url)
                 if r.status_code == 429:
                     logger.warning("Rate limit (429). Используется кэш курса.")
-                    return None
+                    return None, None
                 r.raise_for_status()
                 data = r.json()
                 # Binance: {"symbol":"TONUSDT","price":"5.12"}
                 price = data.get("price")
                 if price is not None:
-                    return float(price)
-                # CoinGecko: {"the-open-network":{"usd":1.33}}
-                price = data.get("the-open-network", {}).get("usd")
-                if price is not None:
-                    return float(price)
+                    return float(price), None
+
+                # CoinGecko: {"the-open-network":{"usd":1.33,"rub":104.78}}
+                cg = data.get("the-open-network") or {}
+                usd = cg.get("usd")
+                rub = cg.get("rub")
+                usd_val = float(usd) if usd is not None else None
+                rub_val = float(rub) if rub is not None else None
+                return usd_val, rub_val
         except Exception as e:
-            logger.warning("Не удалось получить курс TON/USD: %s", e)
-        return None
+            logger.warning("Не удалось получить курс TON: %s", e)
+        return None, None
 
     async def update_ton_rate(self) -> None:
-        """Обновляет курс TON (вызывается периодически). При 429 курс не меняется (остаётся кэш)."""
-        rate = await self.fetch_ton_usd()
-        if rate is not None:
-            async with self._lock:
-                self._ton_usd = rate
-            logger.info("Курс TON/USD обновлён: %s", rate)
+        """Обновляет курсы TON/USD и TON/RUB. При 429 курс не меняется (остаётся кэш)."""
+        usd, rub = await self.fetch_ton_prices()
+        async with self._lock:
+            if usd is not None and usd > 0:
+                self._ton_usd = usd
+            if rub is not None and rub > 0:
+                self._ton_rub = rub
+        if usd is not None and usd > 0:
+            logger.info("Курс TON/USD обновлён: %s", usd)
+        if rub is not None and rub > 0:
+            logger.info("Курс TON/RUB обновлён: %s", rub)
 
     async def get_ton_usd(self) -> Optional[float]:
         """
@@ -91,7 +103,7 @@ class PriceEngine:
                 return 1.0 / ton_usd_rate  # 1 TON = 1/0.751 ≈ 1.33 USD
             return ton_usd_rate  # > 1: 1 TON = rate USD
         async with self._lock:
-            if self._ton_usd is not None:
+            if self._ton_usd is not None and self._ton_usd > 0:
                 return self._ton_usd
         await self.update_ton_rate()
         async with self._lock:
@@ -103,6 +115,17 @@ class PriceEngine:
         fallback = 1.33  # USD за 1 TON (примерно соответствует ~0.751 TON за 1$)
         logger.warning("TON/USD недоступен — используется fallback=%s", fallback)
         return fallback
+
+    async def get_ton_rub(self) -> Optional[float]:
+        """Возвращает курс: сколько RUB стоит 1 TON. Сначала пытается обновить кэш."""
+        async with self._lock:
+            if self._ton_rub is not None and self._ton_rub > 0:
+                return self._ton_rub
+        await self.update_ton_rate()
+        async with self._lock:
+            if self._ton_rub and self._ton_rub > 0:
+                return self._ton_rub
+        return None
 
     def stars_to_usd_with_rate(self, stars: int, usd_per_star: float) -> float:
         """Считает USD за stars по заданному курсу (с учётом скидок)."""
