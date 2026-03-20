@@ -15,6 +15,17 @@ from bot.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+# Общий кэш курса для всех экземпляров PriceEngine.
+# В проекте PriceEngine часто создаётся заново в хендлерах, поэтому
+# локальный кэш экземпляра сбрасывался и бот постоянно ловил 429.
+_shared = {
+    "lock": asyncio.Lock(),
+    "ton_usd": None,  # type: Optional[float]
+    "ton_rub": None,  # type: Optional[float]
+    "next_fetch_at": 0.0,  # type: float
+}
+
+
 @dataclass
 class PriceQuote:
     """Цена за N Stars в выбранной валюте."""
@@ -31,13 +42,7 @@ class PriceEngine:
 
     def __init__(self, config: PriceConfig):
         self.config = config
-        self._ton_usd: Optional[float] = None
-        self._ton_rub: Optional[float] = None
-        self._lock = asyncio.Lock()
         self._task: Optional[asyncio.Task] = None
-        # Защита от спама запросами при 429: если обновление не удалось,
-        # следующие попытки делаем через cooldown.
-        self._next_fetch_at: float = 0.0
 
     def _discount_multiplier(self, stars: int) -> float:
         """Возвращает множитель цены (1.0 = без скидки, 0.95 = 5% скидка)."""
@@ -61,7 +66,7 @@ class PriceEngine:
                 if r.status_code == 429:
                     logger.warning("Rate limit (429). Используется кэш курса.")
                     # Кулдаун на повторные попытки загрузки курса
-                    self._next_fetch_at = time.time() + int(getattr(self.config, "update_interval_seconds", 600))
+                    _shared["next_fetch_at"] = time.time() + int(getattr(self.config, "update_interval_seconds", 600))
                     return None, None
                 r.raise_for_status()
                 data = r.json()
@@ -80,21 +85,21 @@ class PriceEngine:
         except Exception as e:
             logger.warning("Не удалось получить курс TON: %s", e)
             # Кулдаун, чтобы на временных сбоях не долбить API
-            self._next_fetch_at = time.time() + 300
+            _shared["next_fetch_at"] = time.time() + 300
         return None, None
 
     async def update_ton_rate(self) -> None:
         """Обновляет курсы TON/USD и TON/RUB. При 429 курс не меняется (остаётся кэш)."""
         # Если недавно уже были ошибки загрузки — пропускаем попытку.
         now = time.time()
-        if now < self._next_fetch_at:
+        if now < _shared["next_fetch_at"]:
             return
         usd, rub = await self.fetch_ton_prices()
-        async with self._lock:
+        async with _shared["lock"]:
             if usd is not None and usd > 0:
-                self._ton_usd = usd
+                _shared["ton_usd"] = usd
             if rub is not None and rub > 0:
-                self._ton_rub = rub
+                _shared["ton_rub"] = rub
         if usd is not None and usd > 0:
             logger.info("Курс TON/USD обновлён: %s", usd)
         if rub is not None and rub > 0:
@@ -114,13 +119,13 @@ class PriceEngine:
             if ton_usd_rate <= 1.0:
                 return 1.0 / ton_usd_rate  # 1 TON = 1/0.751 ≈ 1.33 USD
             return ton_usd_rate  # > 1: 1 TON = rate USD
-        async with self._lock:
-            if self._ton_usd is not None and self._ton_usd > 0:
-                return self._ton_usd
+        async with _shared["lock"]:
+            if _shared["ton_usd"] is not None and _shared["ton_usd"] > 0:
+                return _shared["ton_usd"]
         await self.update_ton_rate()
-        async with self._lock:
-            if self._ton_usd and self._ton_usd > 0:
-                return self._ton_usd
+        async with _shared["lock"]:
+            if _shared["ton_usd"] and _shared["ton_usd"] > 0:
+                return _shared["ton_usd"]
 
         # Если курс недоступен (например, провайдер блокирует запросы),
         # возвращаем консервативный фиксированный fallback, чтобы бот не зависал.
@@ -130,13 +135,13 @@ class PriceEngine:
 
     async def get_ton_rub(self) -> Optional[float]:
         """Возвращает курс: сколько RUB стоит 1 TON. Сначала пытается обновить кэш."""
-        async with self._lock:
-            if self._ton_rub is not None and self._ton_rub > 0:
-                return self._ton_rub
+        async with _shared["lock"]:
+            if _shared["ton_rub"] is not None and _shared["ton_rub"] > 0:
+                return _shared["ton_rub"]
         await self.update_ton_rate()
-        async with self._lock:
-            if self._ton_rub and self._ton_rub > 0:
-                return self._ton_rub
+        async with _shared["lock"]:
+            if _shared["ton_rub"] and _shared["ton_rub"] > 0:
+                return _shared["ton_rub"]
         return None
 
     def stars_to_usd_with_rate(self, stars: int, usd_per_star: float) -> float:
