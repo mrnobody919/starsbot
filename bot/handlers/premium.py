@@ -143,36 +143,7 @@ async def premium_process_recipient_username(message: Message, state: FSMContext
     if len(username) > 32:
         await message.answer("Слишком длинный username. Введите снова:")
         return
-
-    db_recipient = await session.execute(select(User).where(User.username == username))
-    recipient_user = db_recipient.scalar_one_or_none()
     recipient_display = f"@{username}"
-
-    if not recipient_user:
-        await message.answer(
-            "❌ Пользователь не найден в базе бота.\n"
-            "Попросите его сначала зайти в бота командой `/start`, затем повторите покупку Premium.",
-            reply_markup=premium_recipient_choice_kb(),
-            parse_mode="Markdown",
-        )
-        await state.set_state(PremiumStates.choosing_recipient)
-        return
-
-    # Проверяем активность подписки Premium у получателя (если нашли пользователя в БД).
-    premium_until = getattr(recipient_user, "premium_until", None)
-    if premium_until:
-        # premium_until хранится как datetime (UTC/naive зависит от БД), поэтому сравниваем аккуратно.
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        if premium_until.replace(tzinfo=None) > now:
-            await message.answer(
-                "❌ У этого пользователя уже активна подписка Premium.\n"
-                "Выберите другого получателя или срок.",
-                reply_markup=premium_recipient_choice_kb(),
-            )
-            await state.set_state(PremiumStates.choosing_recipient)
-            return
 
     await state.update_data(
         recipient_type="gift",
@@ -221,20 +192,6 @@ async def premium_choose_duration(callback: CallbackQuery, state: FSMContext, se
     data = await state.get_data()
     recipient_type = data.get("recipient_type")
     recipient_username = data.get("recipient_username")
-
-    # Проверяем, что у получателя нет активной подписки (если это подарок).
-    if recipient_type == "gift" and recipient_username:
-        recipient_user = await session.execute(select(User).where(User.username == recipient_username))
-        recipient_user = recipient_user.scalar_one_or_none()
-        if recipient_user:
-            premium_until = getattr(recipient_user, "premium_until", None)
-            if premium_until:
-                from datetime import datetime, timezone
-
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                if premium_until.replace(tzinfo=None) > now:
-                    await callback.answer("У получателя уже есть Premium.", show_alert=True)
-                    return
 
     # Берём баланс покупателя (внутренний).
     result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))

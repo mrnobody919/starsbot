@@ -212,12 +212,9 @@ async def process_amount(
             f"❌ Вам не хватает {shortage:.2f}$ ({shortage_rub:.2f} ₽) на балансе\n\n"
             f"💰 На балансе: {balance_usd:.2f}$ · К оплате: {shortage:.2f}$ ({shortage_rub:.2f} ₽)\n\n"
             "👇🏻 Выберите способ оплаты из предложенных: 👇🏻\n\n"
-            "💳 СБП — оплата рублями через QR-код\n"
             "💳 Карты — оплата рублями банковской картой\n"
             "🔹 TON — оплата через нативный токен сети TON\n"
-            "💸 USDT TON — оплата через USDT в сети TON\n"
-            "💎 Cryptobot — оплата через Cryptobot\n"
-            "🔸 Другая криптовалюта — оплата в любой криптовалюте"
+            "💎 Cryptobot — оплата через Cryptobot"
         )
         await message.answer(text, reply_markup=topup_methods_kb())
         return

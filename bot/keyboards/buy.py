@@ -78,9 +78,9 @@ def confirm_order_kb(order_id: int) -> InlineKeyboardMarkup:
 
 
 def topup_methods_kb() -> InlineKeyboardMarkup:
-    """Кнопки выбора способа пополнения: СБП 4%, TON без комиссии, Cryptobot 3%."""
+    """Кнопки выбора способа пополнения: карты, TON без комиссии, Cryptobot 3%."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 СБП Рубли | 4%", callback_data="topup:sbp")],
+        [InlineKeyboardButton(text="💳 Карты Рубли | 4%", callback_data="topup:sbp")],
         [InlineKeyboardButton(text="🔹 TON | Без комиссии", callback_data="topup:ton")],
         [InlineKeyboardButton(text="💎 Cryptobot | 3%", callback_data="topup:cryptobot")],
         [InlineKeyboardButton(text="◀️ В меню", callback_data="menu:main")],
